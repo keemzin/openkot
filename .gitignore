@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.env
+.env.local
+vendor/opencode/opencode.exe
+vendor/opencode/WORKING/
+*.tsbuildinfo
+.vscode/
+.opencode/node_modules/
+REFER/
+.playwright-mcp/
+*.lock
+.DS_Store
+*.log
+WORKSPACE/
+vendor
