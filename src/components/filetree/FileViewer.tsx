@@ -123,6 +123,7 @@ export function FileViewer({ path: filePath, onClose, workingDir }: Props) {
   const [saving, setSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saved' | 'error'>('idle');
   const [wordWrap, setWordWrap] = useState(true);
+  const [jumpToLine, setJumpToLine] = useState<number | null>(null);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const editorRef = useRef<CodeEditorRef>(null);
   const draftRef = useRef('');
@@ -132,6 +133,10 @@ export function FileViewer({ path: filePath, onClose, workingDir }: Props) {
   const isMarkdown = ext === 'md';
   const isImage = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext);
   
+  // Block dangerous/binary file types
+  const dangerousExts = ['exe', 'dll', 'so', 'dylib', 'bin', 'zip', 'tar', 'gz', 'rar', '7z', 'iso', 'dmg', 'pkg', 'deb', 'rpm', 'msi', 'lock'];
+  const isDangerous = dangerousExts.includes(ext);
+  
   const isDirty = mode === 'edit' && content !== null && draftContent.replace(/\r\n/g, '\n') !== content.replace(/\r\n/g, '\n');
 
   useEffect(() => {
@@ -140,9 +145,20 @@ export function FileViewer({ path: filePath, onClose, workingDir }: Props) {
 
   useEffect(() => {
     setLoading(true); setError(null); setContent(null); setMode('view'); setSaveStatus('idle');
+    if (isDangerous) {
+      setError(`Cannot open .${ext} files as text`);
+      setLoading(false);
+      return;
+    }
     fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}`)
-      .then(r => { if (!r.ok) throw new Error(`${r.status}`); return r.text(); })
+      .then(r => { 
+        if (!r.ok) throw new Error(`${r.status}`);
+        const size = Number(r.headers.get('content-length') || 0);
+        if (size > 500_000) throw new Error(`File too large to display (${(size / 1024).toFixed(0)} KB)`);
+        return r.text(); 
+      })
       .then(t => { 
+        if (t.length > 500_000) throw new Error('File too large to display');
         const normalized = t.replace(/\r\n/g, '\n');
         setContent(normalized); 
         setDraftContent(normalized); 
@@ -176,7 +192,21 @@ export function FileViewer({ path: filePath, onClose, workingDir }: Props) {
     autoSaveTimer.current = setTimeout(() => save(draftRef.current), 1000);
   };
 
-  const enterEdit = () => {
+  const enterEdit = (e?: React.MouseEvent) => {
+    let line: number | null = null;
+    if (e && content) {
+      // Figure out which line was clicked in the view
+      const target = e.target as HTMLElement;
+      const row = target.closest('tr');
+      if (row) {
+        const tbody = row.parentElement;
+        if (tbody) {
+          const rows = Array.from(tbody.children);
+          line = rows.indexOf(row); // 0-indexed
+        }
+      }
+    }
+    setJumpToLine(line);
     setMode('edit');
     setTimeout(() => {
       const cm = document.querySelector('.cm-content') as HTMLElement;
@@ -277,11 +307,12 @@ export function FileViewer({ path: filePath, onClose, workingDir }: Props) {
             onChange={handleChange}
             onSave={() => save(draftRef.current)}
             wordWrap={wordWrap}
+            jumpToLine={jumpToLine ?? undefined}
           />
         )}
 
         {content !== null && mode === 'view' && (
-          <div style={{ padding: '10px 12px' }} onDoubleClick={enterEdit} title="Double-click to edit">
+          <div style={{ padding: '10px 12px' }} onDoubleClick={(e) => enterEdit(e)} title="Double-click to edit">
             {isImage ? (
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300, padding: 20 }}>
                 <img 

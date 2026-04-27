@@ -23,6 +23,7 @@ interface Props {
   onSave?: () => void;
   fileName: string;
   wordWrap?: boolean;
+  jumpToLine?: number; // 0-indexed line to scroll to on mount
 }
 
 export interface CodeEditorRef {
@@ -66,7 +67,7 @@ const themedHighlight = HighlightStyle.define([
   { tag: tags.heading,              color: 'var(--text)', fontWeight: 'bold' },
 ]);
 
-export const CodeEditor = forwardRef<CodeEditorRef, Props>(({ value, onChange, onSave, fileName, wordWrap = false }, ref) => {
+export const CodeEditor = forwardRef<CodeEditorRef, Props>(({ value, onChange, onSave, fileName, wordWrap = false, jumpToLine }, ref) => {
   const editorRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
 
@@ -163,6 +164,18 @@ export const CodeEditor = forwardRef<CodeEditorRef, Props>(({ value, onChange, o
     });
 
     viewRef.current = view;
+
+    // Jump to line if specified
+    if (jumpToLine !== undefined && jumpToLine !== null) {
+      setTimeout(() => {
+        const v = viewRef.current;
+        if (!v) return;
+        const line = Math.min(jumpToLine + 1, v.state.doc.lines); // clamp
+        const lineObj = v.state.doc.line(line);
+        v.dispatch({ selection: { anchor: lineObj.from }, scrollIntoView: true });
+        v.focus();
+      }, 60);
+    }
 
     return () => {
       view.destroy();
