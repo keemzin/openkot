@@ -2909,14 +2909,28 @@ function App() {
                   {modelOpen && (
                     <div
                       onMouseDown={e => e.stopPropagation()}
-                      style={{
+                      style={isMobile ? {
                         position: 'fixed',
-                        bottom: 90,
-                        right: isMobile ? 12 : 24,
+                        bottom: 70,
+                        left: 12,
+                        right: 12,
                         background: 'var(--bg-4)',
                         border: '1px solid var(--border-2)',
                         borderRadius: 10,
-                        width: isMobile ? 'calc(100vw - 24px)' : 320,
+                        maxHeight: '60vh',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        boxShadow: '0 -4px 32px rgba(0,0,0,0.7)',
+                        zIndex: 9999,
+                      } : {
+                        position: 'absolute',
+                        bottom: '100%',
+                        right: 0,
+                        marginBottom: 6,
+                        background: 'var(--bg-4)',
+                        border: '1px solid var(--border-2)',
+                        borderRadius: 10,
+                        width: 320,
                         maxWidth: 400,
                         maxHeight: 420,
                         display: 'flex',
