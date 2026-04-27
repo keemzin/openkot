@@ -17,18 +17,12 @@ OpenCode Binary (vendor/opencode/opencode.exe)
 
 ## Key Architecture Principles
 
-1. **Component-based architecture**: While `src/App.tsx` remains the main orchestrator (~3,500 lines), most UI components have been refactored into `src/components/` (chat, git, filetree, terminal, ui).
+1. **Component-based architecture**: While `src/App.tsx` remains the main orchestrator (~2,600 lines), most UI components have been refactored into `src/components/` (chat, git, filetree, terminal, ui).
 2. **Zustand state management**: UI state (theme, sidebar, models, agents) uses Zustand stores. Session state (messages, SSE) still uses local state.
 3. **Proxy pattern**: Server proxies most `/api/*` requests to OpenCode, handles filesystem/git/terminal/question directly.
 4. **OpenCode compatibility**: Uses the same API contracts as the OpenCode CLI.
 5. **Bun runtime**: Uses Bun for package management and server runtime (`bun run server`).
 
-## Known Limitations
-
-### Question Tool (OpenCode v1.14.18)
-- Question UI displays correctly when OpenCode asks questions via SSE events.
-- Answers are sent to `/api/question/reply` → OpenCode at `/question/:requestID/reply`.
-- Questions are NOT persisted (disappear on page refresh).
 
 ## State Management (Zustand)
 
@@ -126,13 +120,16 @@ This project uses Zustand for state management:
 │   │   ├── settingsStore.ts # models, agent, autopilot
 │   │   ├── dirStore.ts     # workingDir, recentDirs, sessions
 │   │   └── index.ts      # re-exports
-│   ├── components/        # UI components
-│   │   ├── app/          # Extracted dialog components
-│   │   │   ├── FontPicker.tsx
+│   ├── constants/         # Static constants (themes.ts)
+│   ├── styles/          # CSS files (prism.css)
+│   ├── components/
+│   │   ├── app/          # App-level components
+│   │   │   ├── AgentSelector.tsx
 │   │   │   ├── DirPicker.tsx
+│   │   │   ├── FontPicker.tsx
+│   │   │   ├── McpForm.tsx
 │   │   │   ├── PermissionCard.tsx
 │   │   │   ├── QuestionCard.tsx
-│   │   │   ├── McpForm.tsx
 │   │   │   └── SettingsDialog.tsx
 │   │   ├── chat/         # Chat components
 │   │   ├── git/          # Git components
@@ -224,15 +221,29 @@ This project uses Zustand for state management:
 3. Supported types include: `bash`, `read`, `write`, `edit`, `grep`, `glob`, `ask`, `task`, `webfetch`, `codesearch`, `todo`.
 
 ### Modifying Theme
-1. Edit CSS variables in `src/index.css` or the `THEMES` object in `src/App.tsx`.
+1. Edit CSS variables in `src/index.css` or the theme definitions in `src/constants/themes.ts`.
 2. Persisted via `localStorage['oc_theme']`.
+
+## Refactoring History
+
+### App.tsx Size Reduction (2026-04-27)
+Extracted the following from App.tsx to reduce its size from ~2,926 to ~2,631 lines:
+
+| Component | New Location | Lines |
+|-----------|-------------|-------|
+| Prism CSS | `src/styles/prism.css` | ~45 |
+| Theme definitions | `src/constants/themes.ts` | ~120 |
+| RightPanel | `src/components/ui/RightPanel.tsx` | ~90 |
+| AgentSelector | `src/components/app/AgentSelector.tsx` | ~55 |
+
+Skipped: ModelSelector (too coupled with session state), FileTreePanel (depends on many shared types)
 
 ## Refactoring Status (2026-04-23)
 
 ### Completed
 - ✅ Zustand installed (`zustand@5.0.12`)
 - ✅ Stores created in `src/stores/` (4 files)
-- ✅ Components extracted to `src/components/app/` (6 files)
+- ✅ Components extracted to `src/components/app/` (8 files)
 - ✅ Stores wired to App.tsx (theme, sidebar, rightPanel, model/agent/autopilot)
 - ✅ PermissionCard - extracted
 - ✅ FontPicker - extracted
@@ -240,6 +251,10 @@ This project uses Zustand for state management:
 - ✅ QuestionCard - extracted
 - ✅ McpForm - extracted
 - ✅ SettingsDialog - extracted
+- ✅ AgentSelector - extracted
+- ✅ RightPanel - extracted
+- ✅ Theme definitions - extracted to `src/constants/themes.ts`
+- ✅ Prism CSS - extracted to `src/styles/prism.css`
 
 All inline components have been extracted. Refactoring complete!
 
@@ -250,6 +265,13 @@ All inline components have been extracted. Refactoring complete!
    - Keep the import at top of file
    - Build and verify after each removal
 3. Update this file when complete
+
+All inline components have been extracted. Refactoring complete!
+
+### Remaining Large Components (Not Extracted)
+These components are tightly coupled with App.tsx state and could be extracted in the future with more refactoring:
+- **ModelSelector** (~200 lines) - coupled with session state
+- **FileTreePanel** (~400 lines) - depends on many shared types and utilities
 
 ## Troubleshooting
 

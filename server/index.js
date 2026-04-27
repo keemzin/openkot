@@ -1244,6 +1244,70 @@ async function start() {
     ]);
   });
 
+  // Custom providers CRUD — stored in opencode.jsonc under "provider" key
+  app.get('/api/config/providers/custom', (req, res) => {
+    try {
+      const config = readConfig();
+      const provider = config.provider || {};
+      const list = Object.entries(provider).map(([id, cfg]) => ({
+        name: id,
+        displayName: cfg.name || id,
+        npm: cfg.npm || '@ai-sdk/openai-compatible',
+        baseUrl: cfg.options?.baseURL || '',
+        apiKey: cfg.options?.apiKey || '',
+        models: Object.keys(cfg.models || {}),
+      }));
+      res.json(list);
+    } catch (e) {
+      res.json([]);
+    }
+  });
+
+  app.post('/api/config/providers/custom/:name', jsonBody, async (req, res) => {
+    try {
+      const { name } = req.params;
+      const { displayName, npm, baseUrl, apiKey, models } = req.body;
+      const config = readConfig();
+      config.provider = config.provider || {};
+
+      // Build models object: { "model-id": { "name": "model-id" } }
+      const modelsObj = {};
+      if (Array.isArray(models)) {
+        for (const m of models) {
+          modelsObj[m] = { name: m };
+        }
+      }
+
+      const entry = {
+        name: displayName || name,
+        npm: npm || '@ai-sdk/openai-compatible',
+        options: { baseURL: baseUrl, ...(apiKey ? { apiKey } : {}) },
+        models: modelsObj,
+      };
+
+      config.provider[name] = entry;
+      await writeConfig(config);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete('/api/config/providers/custom/:name', async (req, res) => {
+    try {
+      const { name } = req.params;
+      const config = readConfig();
+      if (config.provider?.[name]) {
+        delete config.provider[name];
+        if (Object.keys(config.provider).length === 0) delete config.provider;
+        await writeConfig(config);
+      }
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
 
 
   // Do NOT use express.json() before the proxy — it consumes the request body

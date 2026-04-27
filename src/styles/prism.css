@@ -1,0 +1,44 @@
+.prism-code { background: transparent; }
+/* Use !important to beat the pre code color override */
+/* comments — muted */
+.prism-code .token.comment,
+.prism-code .token.prolog,
+.prism-code .token.doctype,
+.prism-code .token.cdata { color: var(--text-4) !important; font-style: italic; }
+/* punctuation */
+.prism-code .token.punctuation { color: var(--text-3) !important; }
+/* numbers, booleans, constants — orange */
+.prism-code .token.number,
+.prism-code .token.boolean,
+.prism-code .token.constant,
+.prism-code .token.symbol,
+.prism-code .token.property,
+.prism-code .token.tag { color: var(--orange) !important; }
+/* strings — green */
+.prism-code .token.string,
+.prism-code .token.char,
+.prism-code .token.attr-name,
+.prism-code .token.selector,
+.prism-code .token.builtin { color: var(--green) !important; }
+/* operators — blue */
+.prism-code .token.operator,
+.prism-code .token.entity,
+.prism-code .token.url,
+.prism-code .language-css .token.string,
+.prism-code .style .token.string { color: var(--blue) !important; }
+/* keywords — accent */
+.prism-code .token.keyword,
+.prism-code .token.atrule,
+.prism-code .token.attr-value { color: var(--accent) !important; }
+/* functions — blue */
+.prism-code .token.function,
+.prism-code .token.class-name { color: var(--blue) !important; }
+/* regex, variables — red */
+.prism-code .token.regex,
+.prism-code .token.important,
+.prism-code .token.variable { color: var(--red) !important; }
+.prism-code .token.important,
+.prism-code .token.bold { font-weight: bold; }
+.prism-code .token.italic { font-style: italic; }
+.prism-code .token.inserted { color: var(--green) !important; background: color-mix(in srgb, var(--green) 12%, transparent); }
+.prism-code .token.deleted { color: var(--red) !important; background: color-mix(in srgb, var(--red) 12%, transparent); }
