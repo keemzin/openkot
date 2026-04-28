@@ -112,6 +112,14 @@ export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStrea
     </div>
   ) : null;
 
+  const LINE_THRESHOLD = 7;
+  const userLines = isUser ? textContent.split('\n') : [];
+  const userIsLong = userLines.length > LINE_THRESHOLD;
+  const [userExpanded, setUserExpanded] = useState(false);
+  const displayedText = isUser && userIsLong && !userExpanded
+    ? userLines.slice(0, LINE_THRESHOLD).join('\n')
+    : textContent;
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 2 }}>
       {isUser && hasContent && (
@@ -122,7 +130,15 @@ export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStrea
           fontSize: 15, lineHeight: 1.6, color: 'var(--text)',
           whiteSpace: 'pre-wrap', wordBreak: 'break-word',
         }}>
-          {textContent}
+          {displayedText}
+          {userIsLong && (
+            <div
+              onClick={() => setUserExpanded(e => !e)}
+              style={{ marginTop: 6, fontSize: 12, color: 'var(--accent)', cursor: 'pointer', userSelect: 'none' }}
+            >
+              {userExpanded ? '▲ Show less' : `▼ Show ${userLines.length - LINE_THRESHOLD} more lines`}
+            </div>
+          )}
         </div>
       )}
 

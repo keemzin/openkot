@@ -18,16 +18,58 @@ function ToolIcon({ toolName }: { toolName: string }) {
   );
 }
 
+/** Inline justification text between tool calls */
+function JustificationRow({ text, defaultOpen }: { text: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(!!defaultOpen);
+  const preview = text.trim().replace(/\s+/g, ' ').slice(0, 120);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      <div
+        role="button"
+        onClick={() => setOpen(o => !o)}
+        style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 0', cursor: 'pointer', userSelect: 'none' }}
+      >
+        <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: 'var(--tools-description)' }} />
+        {/* refresh/loop icon */}
+        <span style={{ color: 'var(--tools-icon)', display: 'inline-flex', alignItems: 'center' }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+          </svg>
+        </span>
+        <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--tools-title)', flexShrink: 0 }}>Justification</span>
+        {!open && (
+          <span style={{ fontSize: '0.8rem', color: 'var(--tools-description)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+            {preview}
+          </span>
+        )}
+        <span style={{ color: 'var(--tools-description)', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            {open ? <path d="M6 9l6 6 6-6" /> : <path d="M9 18l6-6-6-6" />}
+          </svg>
+        </span>
+      </div>
+      {open && (
+        <div style={{ paddingLeft: 20, paddingBottom: 6, fontSize: '0.8rem', color: 'var(--text-3)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+          {text.trim()}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ToolRow({ part }: { part: Part }) {
   const [open, setOpen] = useState(false);
   const toolName = (part.tool as string) || part.type;
   const state = (part.state as any) ?? {};
-  const isRunning = state.status === 'running' || state.status === 'pending' || (!state.status && state.status !== 'completed' && state.status !== 'error');
+  const isRunning = state.status === 'running' || state.status === 'pending';
   const isError = state.status === 'error';
-  const isDone = state.status === 'completed' || state.status === 'error';
+  const isDone = state.status === 'completed' || state.status === 'error' || (!state.status && (state.output !== undefined || state.error !== undefined));
 
   const isQuestion = toolName === 'question';
-  const isExpandable = isQuestion || isDiffTool(toolName) || toolName === 'bash' || toolName === 'shell' || toolName === 'cmd';
+  const hasExpandableContent = isDiffTool(toolName) || toolName === 'bash' || toolName === 'shell' || toolName === 'cmd' ||
+    toolName === 'write' || toolName === 'create' || toolName === 'file_write';
+  const isExpandable = isQuestion || (hasExpandableContent && isDone);
 
   const label = getToolDisplayName(toolName);
   const desc = getToolDescription(toolName, state);
@@ -85,7 +127,7 @@ function ToolRow({ part }: { part: Part }) {
             {displayDesc}
           </span>
         )}
-        {isExpandable && (isDone || isQuestion) && (
+        {isExpandable && (
           <span style={{ color: 'var(--tools-description)', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               {open ? <path d="M6 9l6 6 6-6" /> : <path d="M9 18l6-6-6-6" />}
@@ -139,27 +181,54 @@ function ToolRow({ part }: { part: Part }) {
           })}
         </div>
       )}
+      {open && !isQuestion && hasExpandableContent && (
+        <div style={{ paddingLeft: 12, paddingBottom: 6 }}>
+          <ToolPart part={part} />
+        </div>
+      )}
     </div>
   );
 }
 
-export const ToolGroup = React.memo(function ToolGroup({ parts }: { parts: Part[] }) {
-  const [open, setOpen] = useState(true);
+export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming }: { parts: Part[]; isStreaming?: boolean }) {
+  const hasJustifications = parts.some(p => p.type === 'text');
+  // While streaming → full view. After load/refresh → justifications only (or hidden if none)
+  const [view, setView] = useState<'full' | 'justify' | 'hidden'>(
+    isStreaming ? 'full' : (hasJustifications ? 'justify' : 'hidden')
+  );
+
+  // Switch to full while streaming, stay there until user manually changes
+  const prevStreaming = React.useRef(isStreaming);
+  React.useEffect(() => {
+    if (isStreaming && !prevStreaming.current) setView('full');
+    prevStreaming.current = isStreaming;
+  }, [isStreaming]);
 
   const anyRunning = parts.some(p => {
+    if (p.type !== 'tool') return false;
     const s = (p.state as any) ?? {};
-    return s.status === 'running' || s.status === 'pending' || (!s.status && s.status !== 'completed');
+    return s.status === 'running' || s.status === 'pending';
   });
+
+  const justificationParts = parts.filter(p => p.type === 'text');
+
+  const cycle = () => setView(v => {
+    if (v === 'justify') return 'full';
+    if (v === 'full') return 'hidden';
+    return hasJustifications ? 'justify' : 'full';
+  });
+
+  const chevron = view === 'full' ? '∧' : view === 'justify' ? '⊟' : '∨';
 
   return (
     <div style={{ marginBottom: 4 }}>
       <button
         type="button"
-        onClick={() => setOpen(o => !o)}
+        onClick={cycle}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
           background: 'transparent', border: 'none', cursor: 'pointer',
-          fontFamily: 'inherit', padding: '2px 0', marginBottom: open ? 4 : 0,
+          fontFamily: 'inherit', padding: '2px 0', marginBottom: view !== 'hidden' ? 4 : 0,
         }}
       >
         <span style={{ color: 'var(--tools-icon)', display: 'inline-flex', alignItems: 'center' }}>
@@ -168,17 +237,27 @@ export const ToolGroup = React.memo(function ToolGroup({ parts }: { parts: Part[
           </svg>
         </span>
         <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--tools-title)' }}>Trail</span>
-        <span style={{ fontSize: '0.75rem', color: 'var(--tools-description)' }}>{open ? '∧' : '∨'}</span>
+        <span style={{ fontSize: '0.75rem', color: 'var(--tools-description)' }}>{chevron}</span>
         {anyRunning && (
           <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 4px var(--accent)', flexShrink: 0 }} />
         )}
       </button>
 
-      {open && (
+      {view === 'full' && (
         <div style={{ paddingLeft: 8, borderLeft: '2px solid var(--bg-4)', display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {parts.map(p => (
-            <ToolRow key={p.id} part={p} />
-          ))}
+          {parts.map(p =>
+            p.type === 'text'
+              ? <JustificationRow key={p.id} text={p.text ?? ''} />
+              : <ToolRow key={p.id} part={p} />
+          )}
+        </div>
+      )}
+
+      {view === 'justify' && hasJustifications && (
+        <div style={{ paddingLeft: 8, borderLeft: '2px solid var(--bg-4)', display: 'flex', flexDirection: 'column', gap: 1 }}>
+          {justificationParts.map(p =>
+            <JustificationRow key={p.id} text={p.text ?? ''} />
+          )}
         </div>
       )}
     </div>
