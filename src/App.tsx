@@ -1429,9 +1429,9 @@ function App() {
   const renameSession = useCallback(async (id: string, title: string) => {
     const dir = getWorkingDir();
     await fetch(`/api/session/${encodeURIComponent(id)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title, directory: dir }),
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', 'x-opencode-directory': dir },
+      body: JSON.stringify({ title }),
     }).catch(() => {});
     await loadSessions();
   }, [loadSessions]);
