@@ -65,10 +65,33 @@ import { RightPanel, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX, RIGHT_PANEL_DEFAULT, LS_P
 
 function FileTreePanel({ workingDir }: { workingDir: string }) {
   const [rootEntries, setRootEntries] = useState<FsEntry[] | null>(null);
-  // Multi-tab file viewer
-  const [openTabs, setOpenTabs] = useState<string[]>([]);
-  const [activeTab, setActiveTabFile] = useState<string | null>(null);
-  const [tab, setTab] = useState<'files' | 'viewer'>('files');
+
+  // Persist open tabs per working directory so they survive panel close/reopen
+  const tabsKey = `oc_open_tabs_${workingDir}`;
+  const activeKey = `oc_active_tab_${workingDir}`;
+  const [openTabs, setOpenTabsRaw] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(tabsKey) || '[]'); } catch { return []; }
+  });
+  const [activeTab, setActiveTabFileRaw] = useState<string | null>(() => {
+    return localStorage.getItem(activeKey) || null;
+  });
+  const [tab, setTab] = useState<'files' | 'viewer'>(() => {
+    const saved = localStorage.getItem(activeKey);
+    return saved ? 'viewer' : 'files';
+  });
+
+  const setOpenTabs = (updater: string[] | ((prev: string[]) => string[])) => {
+    setOpenTabsRaw(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      localStorage.setItem(tabsKey, JSON.stringify(next));
+      return next;
+    });
+  };
+  const setActiveTabFile = (val: string | null) => {
+    setActiveTabFileRaw(val);
+    if (val) localStorage.setItem(activeKey, val);
+    else localStorage.removeItem(activeKey);
+  };
   const [showHidden, setShowHidden] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [ctxMenu, setCtxMenu] = useState<CtxMenu | null>(null);
