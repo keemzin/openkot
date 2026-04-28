@@ -138,10 +138,18 @@ function FileTreePanel({ workingDir }: { workingDir: string }) {
 
   useEffect(() => { loadRoot(); loadGitStatus(); }, [loadRoot, loadGitStatus]);
 
-  // Refresh git status every 1.5s so file tree badges stay in sync
+  // Refresh git status on window focus and tab visibility change (no polling)
   useEffect(() => {
-    const id = setInterval(loadGitStatus, 1500);
-    return () => clearInterval(id);
+    const handleVisibilityChange = () => {
+      if (!document.hidden) loadGitStatus();
+    };
+    const handleFocus = () => { loadGitStatus(); };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleFocus);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleFocus);
+    };
   }, [loadGitStatus]);
 
   const refresh = () => { loadRoot(); loadGitStatus(); setRefreshKey(k => k + 1); };
@@ -187,12 +195,12 @@ function FileTreePanel({ workingDir }: { workingDir: string }) {
     return (M + A + D) > 0 ? { M, A, D } : null;
   }, [gitStatus, workingDir]);
 
-  const handleFileClick = (p: string) => { openFileTab(p.replace(/\\/g, '/')); };
+  const handleFileClick = useCallback((p: string) => { openFileTab(p.replace(/\\/g, '/')); }, [openFileTab]);
 
-  const handleContextMenu = (e: React.MouseEvent, entry: FsEntry) => {
+  const handleContextMenu = useCallback((e: React.MouseEvent, entry: FsEntry) => {
     e.preventDefault();
     setCtxMenu({ x: Math.min(e.clientX, window.innerWidth - 170), y: Math.min(e.clientY, window.innerHeight - 200), entry });
-  };
+  }, []);
 
   const handleCtxAction = async (action: string, entry: FsEntry) => {
     if (action === 'copyPath') { await navigator.clipboard.writeText(entry.path.replace(/\//g, '\\')).catch(() => {}); showToast('Path copied'); return; }
