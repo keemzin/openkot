@@ -234,6 +234,80 @@ function cmdClean() {
   console.log(`Cleaned ${before - config.instances.length} stale entries. ${config.instances.length} active.`);
 }
 
+async function cmdUpdate(opts: { branch?: string }) {
+  const branch = opts.branch ?? 'main';
+  if (!['main', 'dev'].includes(branch)) {
+    console.error(`❌ Invalid branch "${branch}". Choose: main, dev`);
+    process.exit(1);
+  }
+
+  const run = (cmd: string[]) => {
+    const r = Bun.spawnSync(cmd, { cwd: PROJECT_ROOT, stdio: ['ignore', 'inherit', 'inherit'] });
+    if (r.exitCode !== 0) throw new Error(`Failed: ${cmd.join(' ')}`);
+  };
+
+  const capture = (cmd: string[]) => {
+    const r = Bun.spawnSync(cmd, { cwd: PROJECT_ROOT, stdio: ['ignore', 'pipe', 'pipe'] });
+    return new TextDecoder().decode(r.stdout).trim();
+  };
+
+  try {
+    console.log(`\n🔄 Fetching changes from branch: ${branch}...\n`);
+    run(['git', 'fetch', 'origin', branch]);
+
+    // Show what will change
+    const log = capture(['git', 'log', '--oneline', `HEAD..origin/${branch}`]);
+    if (!log) {
+      console.log('✅ Already up to date. Nothing to update.');
+      return;
+    }
+
+    console.log('📋 Incoming changes:');
+    console.log('─'.repeat(50));
+    log.split('\n').forEach(l => console.log('  ' + l));
+    console.log('─'.repeat(50));
+
+    // Show locally modified tracked files
+    const localChanges = capture(['git', 'status', '--short']);
+    if (localChanges) {
+      console.log('\n⚠️  WARNING: You have local modifications to tracked files:');
+      localChanges.split('\n').forEach(l => console.log('  ' + l));
+      console.log('\n  These files WILL be overwritten by git pull.');
+      console.log('  Commit or back them up before updating.\n');
+    }
+
+    // What won't be touched
+    console.log('🔒 These will NOT be replaced:');
+    console.log('  • .opencode/opencode.jsonc  (gitignored — your MCP config)');
+    console.log('  • .env                       (gitignored — your ports/settings)');
+    console.log('  • vendor/                    (gitignored — opencode binary)\n');
+
+    // Ask user
+    process.stdout.write('Proceed with update? (y/N): ');
+    const answer = await new Promise<string>(resolve => {
+      process.stdin.setEncoding('utf-8');
+      process.stdin.once('data', d => resolve(d.toString().trim().toLowerCase()));
+    });
+
+    if (answer !== 'y' && answer !== 'yes') {
+      console.log('Cancelled.');
+      return;
+    }
+
+    console.log('\n📦 Pulling...');
+    run(['git', 'pull', 'origin', branch]);
+    console.log('✅ Code updated\n');
+
+    console.log('📦 Installing dependencies...');
+    run(['bun', 'install']);
+    console.log('\n🔨 Building frontend...');
+    run(['bun', 'run', 'build']);
+    console.log('\n✅ Update complete! Restart openkot to apply changes.');
+  } catch (e: any) {
+    console.error(`\n❌ Update failed: ${e.message}`);
+  }
+}
+
 function printHelp() {
   console.log(`
 OpenKot CLI
@@ -245,6 +319,8 @@ Usage:
   openkot stop [dir]           Stop instance for directory
   openkot list                 List running instances
   openkot clean                Remove stale entries
+  openkot update               Update to latest (main branch)
+  openkot update --branch dev  Update from dev branch
 
 Options:
   --port <port>                Web UI port (default: ${DEFAULT_PORT})
@@ -294,6 +370,9 @@ async function main() {
       break;
     case "clean":
       cmdClean();
+      break;
+    case "update":
+      await cmdUpdate({ branch: flags.branch as string | undefined });
       break;
     case "help":
       printHelp();
