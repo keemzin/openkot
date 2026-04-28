@@ -4,7 +4,7 @@ import { fallbackCopy } from '../../utils/helpers';
 import { Markdown } from './Markdown';
 import { ToolGroup } from './ToolGroup';
 
-export function ChatMessage({ msg, parts, isStreaming, onFork, hideTools }: {
+export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStreaming, onFork, hideTools }: {
   msg: Message; parts?: Part[]; isStreaming?: boolean;
   onFork?: (messageId: string) => void;
   hideTools?: boolean;
@@ -156,4 +156,4 @@ export function ChatMessage({ msg, parts, isStreaming, onFork, hideTools }: {
       )}
     </div>
   );
-}
+});
