@@ -2429,39 +2429,53 @@ function App() {
                 const msg = turn.msgs[0];
                 return <ChatMessage key={msg.id} msg={msg} parts={partsMap[msg.id]} isStreaming={msg.id === streamingMsgId} onFork={forkSession} />;
               }
-              // Assistant turn — interleave: collect tools until a text response, emit Trail+text, repeat
-              // Build segments: each segment = { tools: Part[], textMsg: Message | null }
-              const segments: Array<{ tools: any[]; textMsg: any | null }> = [];
-              let pendingTools: any[] = [];
+              // Assistant turn — ONE Trail for all tool activity, ONE final text response
+              // Collect all trail parts (tools + interleaved justification text) across all messages
+              const SKIP_TOOLS = new Set(['step-start', 'step_start', 'reasoning', 'thinking', 'snapshot']);
+              const allTrailParts: any[] = [];
+              let finalTextMsg: any = null;
+              let finalTailTextParts: any[] = [];
+
               for (const m of turn.msgs) {
                 const mParts = partsMap[m.id] ?? [];
-                const tools = mParts.filter((p: any) => p.type === 'tool');
-                const text = mParts.filter((p: any) => p.type === 'text').map((p: any) => p.text ?? '').join('') || m.content;
-                const hasText = text.trim().length > 0 || m.id === streamingMsgId;
-                pendingTools.push(...tools);
-                if (hasText) {
-                  segments.push({ tools: pendingTools, textMsg: m });
-                  pendingTools = [];
+                const lastToolIdx = mParts.reduce((acc: number, p: any, i: number) =>
+                  (p.type === 'tool' && !SKIP_TOOLS.has((p.tool ?? p.toolName ?? '').toLowerCase())) ? i : acc, -1);
+
+                if (lastToolIdx >= 0) {
+                  // Everything up to and including last real tool → Trail
+                  const trailSlice = mParts.slice(0, lastToolIdx + 1).filter((p: any) => {
+                    if (p.type === 'tool') return !SKIP_TOOLS.has((p.tool ?? p.toolName ?? '').toLowerCase());
+                    return p.type === 'text'; // keep interleaved text as justification
+                  });
+                  allTrailParts.push(...trailSlice);
+                  // Text after last tool = candidate final response
+                  const tail = mParts.slice(lastToolIdx + 1).filter((p: any) => p.type === 'text');
+                  if (tail.length > 0) { finalTailTextParts = tail; finalTextMsg = m; }
+                } else {
+                  // No tools in this message — it's a pure text response
+                  const textParts = mParts.filter((p: any) => p.type === 'text');
+                  const text = textParts.map((p: any) => p.text ?? '').join('') || m.content;
+                  if (text.trim().length > 0 || m.id === streamingMsgId) {
+                    finalTailTextParts = textParts.length > 0 ? textParts : [];
+                    finalTextMsg = m;
+                  }
                 }
               }
-              // Any trailing tools with no text response yet
-              if (pendingTools.length > 0) {
-                segments.push({ tools: pendingTools, textMsg: null });
+              // streaming message with no parts yet
+              if (!finalTextMsg && turn.msgs.length > 0) {
+                const last = turn.msgs[turn.msgs.length - 1];
+                if (last.id === streamingMsgId) { finalTextMsg = last; finalTailTextParts = []; }
               }
               return (
                 <div key={`turn-${ti}`} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {segments.map((seg, si) => (
-                    <React.Fragment key={si}>
-                      {seg.tools.length > 0 && (
-                        <div style={{ marginBottom: seg.textMsg ? 6 : 0 }}>
-                          <ToolGroup parts={seg.tools} />
-                        </div>
-                      )}
-                      {seg.textMsg && (
-                        <ChatMessage msg={seg.textMsg} parts={partsMap[seg.textMsg.id]} isStreaming={seg.textMsg.id === streamingMsgId} onFork={forkSession} hideTools />
-                      )}
-                    </React.Fragment>
-                  ))}
+                  {allTrailParts.length > 0 && (
+                    <div style={{ marginBottom: finalTextMsg ? 6 : 0 }}>
+                      <ToolGroup parts={allTrailParts} isStreaming={turn.msgs.some((m: any) => m.id === streamingMsgId)} />
+                    </div>
+                  )}
+                  {finalTextMsg && (
+                    <ChatMessage msg={finalTextMsg} parts={finalTailTextParts.length > 0 ? finalTailTextParts : (partsMap[finalTextMsg.id] ?? []).filter((p: any) => p.type === 'text')} isStreaming={finalTextMsg.id === streamingMsgId} onFork={forkSession} hideTools />
+                  )}
                 </div>
               );
             });
