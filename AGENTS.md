@@ -18,27 +18,12 @@ OpenCode Binary (vendor/opencode/opencode.exe)
 ## Key Architecture Principles
 
 1. **Component-based architecture**: While `src/App.tsx` remains the main orchestrator (~2,600 lines), most UI components have been refactored into `src/components/` (chat, git, filetree, terminal, ui).
-2. **Zustand state management**: UI state (theme, sidebar, models, agents) uses Zustand stores. Session state (messages, SSE) still uses local state.
+2. **Local state management**: UI state (theme, sidebar, models, agents, sessions) uses React local state with useState hooks. No external state library is used.
 3. **Proxy pattern**: Server proxies most `/api/*` requests to OpenCode, handles filesystem/git/terminal/question directly.
 4. **OpenCode compatibility**: Uses the same API contracts as the OpenCode CLI.
 5. **Bun runtime**: Uses Bun for package management and server runtime (`bun run server`).
 
 
-## State Management (Zustand)
-
-This project uses Zustand for state management:
-
-### Stores
-- **`src/stores/uiStore.ts`**: Theme, sidebar, tabs, panels (in use)
-- **`src/stores/settingsStore.ts`**: Models, agents, autopilot (in use)
-- **`src/stores/sessionStore.ts`**: Messages, SSE (available but not yet wired)
-- **`src/stores/dirStore.ts`**: Working dir, recent dirs (available but not yet wired)
-
-### Adding a New Store
-1. Create `src/stores/<name>Store.ts`
-2. Use `create<StateInterface>` pattern
-3. Import and wire incrementally in App.tsx
-4. Test build after each change
 - **API Discovery**: OpenCode endpoint is `/question/:requestID/reply` (with requestID as URL param).
 
 ### File Reading Limitations
@@ -113,13 +98,9 @@ This project uses Zustand for state management:
 
 ```
 ├── src/
-│   ├── App.tsx              # Main orchestrator (~1,200 lines, uses Zustand stores)
-│   ├── stores/              # Zustand state management
-│   │   ├── sessionStore.ts   # messages, partsMap, sessionId, streaming
-│   │   ├── uiStore.ts      # sidebar, rightPanel, theme, tabs
-│   │   ├── settingsStore.ts # models, agent, autopilot
-│   │   ├── dirStore.ts     # workingDir, recentDirs, sessions
-│   │   └── index.ts      # re-exports
+│   ├── App.tsx              # Main orchestrator (~1,200 lines, uses local state)
+│   ├── stores/              # Minimal state management (preferences only)
+│   │   └── preferencesStore.ts # Font preferences (used by FontPicker)
 │   ├── constants/         # Static constants (themes.ts)
 │   ├── styles/          # CSS files (prism.css)
 │   ├── components/
@@ -238,13 +219,10 @@ Extracted the following from App.tsx to reduce its size from ~2,926 to ~2,631 li
 
 Skipped: ModelSelector (too coupled with session state), FileTreePanel (depends on many shared types)
 
-## Refactoring Status (2026-04-23)
+## Refactoring Status (2026-04-28)
 
 ### Completed
-- ✅ Zustand installed (`zustand@5.0.12`)
-- ✅ Stores created in `src/stores/` (4 files)
 - ✅ Components extracted to `src/components/app/` (8 files)
-- ✅ Stores wired to App.tsx (theme, sidebar, rightPanel, model/agent/autopilot)
 - ✅ PermissionCard - extracted
 - ✅ FontPicker - extracted
 - ✅ DirPicker - extracted
@@ -255,6 +233,7 @@ Skipped: ModelSelector (too coupled with session state), FileTreePanel (depends 
 - ✅ RightPanel - extracted
 - ✅ Theme definitions - extracted to `src/constants/themes.ts`
 - ✅ Prism CSS - extracted to `src/styles/prism.css`
+- ✅ Unused Zustand stores removed (2026-04-28) - kept only preferencesStore for font management
 
 All inline components have been extracted. Refactoring complete!
 
