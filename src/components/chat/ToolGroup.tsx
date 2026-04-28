@@ -32,13 +32,11 @@ function ToolRow({ part }: { part: Part }) {
   const label = getToolDisplayName(toolName);
   const desc = getToolDescription(toolName, state);
 
-  // For question tool: extract Q&A from state
   const questionData = isQuestion ? (() => {
     const input = state.input ?? {};
     const output = state.output ?? '';
     const questions: Array<{ question: string; header?: string; options?: Array<{ label: string; description?: string }> }> =
       Array.isArray(input.questions) ? input.questions : [];
-    // Parse answer from output: "User has answered your questions: "Q"="A". You can now..."
     const answers: Record<string, string> = {};
     const match = output.match(/User has answered your questions:\s*(.+?)(?:\.\s*You can now|$)/s);
     if (match) {
@@ -51,7 +49,6 @@ function ToolRow({ part }: { part: Part }) {
 
   const dotColor = isError ? 'var(--tools-edit-removed)' : isRunning ? 'var(--accent)' : 'var(--tools-description)';
 
-  // For question: show first question as description if no desc
   const displayDesc = isQuestion && questionData?.questions[0]?.question
     ? questionData.questions[0].question.slice(0, 60)
     : desc;
@@ -68,24 +65,17 @@ function ToolRow({ part }: { part: Part }) {
           userSelect: 'none',
         }}
       >
-        {/* status dot */}
         <span style={{
           width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
           background: dotColor,
           boxShadow: isRunning ? `0 0 4px ${dotColor}` : 'none',
         }} />
-
-        {/* tool icon */}
         <span style={{ color: 'var(--tools-icon)', display: 'inline-flex', alignItems: 'center' }}>
           <ToolIcon toolName={toolName} />
         </span>
-
-        {/* label */}
         <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--tools-title)', flexShrink: 0 }}>
           {label}
         </span>
-
-        {/* description */}
         {displayDesc && (
           <span style={{
             fontSize: '0.8rem', color: 'var(--tools-description)',
@@ -95,8 +85,6 @@ function ToolRow({ part }: { part: Part }) {
             {displayDesc}
           </span>
         )}
-
-        {/* expand chevron */}
         {isExpandable && (isDone || isQuestion) && (
           <span style={{ color: 'var(--tools-description)', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -112,12 +100,10 @@ function ToolRow({ part }: { part: Part }) {
             const answer = questionData.answers[q.question];
             return (
               <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                {/* Question */}
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                   <span style={{ fontSize: '0.7rem', color: 'var(--accent)', fontWeight: 700, flexShrink: 0, marginTop: 1 }}>Q</span>
                   <span style={{ fontSize: '0.8rem', color: 'var(--tools-title)', lineHeight: 1.4 }}>{q.question}</span>
                 </div>
-                {/* Options if present */}
                 {Array.isArray(q.options) && q.options.length > 0 && (
                   <div style={{ paddingLeft: 16, display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                     {q.options.map((opt, j) => {
@@ -136,14 +122,12 @@ function ToolRow({ part }: { part: Part }) {
                     })}
                   </div>
                 )}
-                {/* Answer */}
                 {answer && (
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6, paddingLeft: 0 }}>
                     <span style={{ fontSize: '0.7rem', color: 'var(--green)', fontWeight: 700, flexShrink: 0, marginTop: 1 }}>A</span>
                     <span style={{ fontSize: '0.8rem', color: 'var(--text-3)', lineHeight: 1.4 }}>{answer}</span>
                   </div>
                 )}
-                {/* Fallback: raw output if no parsed answer */}
                 {!answer && questionData.rawOutput && i === 0 && (
                   <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
                     <span style={{ fontSize: '0.7rem', color: 'var(--green)', fontWeight: 700, flexShrink: 0, marginTop: 1 }}>A</span>
@@ -155,17 +139,11 @@ function ToolRow({ part }: { part: Part }) {
           })}
         </div>
       )}
-
-      {open && !isQuestion && isExpandable && (
-        <div style={{ paddingLeft: 20, paddingBottom: 4 }}>
-          <ToolPart part={part} />
-        </div>
-      )}
     </div>
   );
 }
 
-export function ToolGroup({ parts }: { parts: Part[] }) {
+export const ToolGroup = React.memo(function ToolGroup({ parts }: { parts: Part[] }) {
   const [open, setOpen] = useState(true);
 
   const anyRunning = parts.some(p => {
@@ -175,7 +153,6 @@ export function ToolGroup({ parts }: { parts: Part[] }) {
 
   return (
     <div style={{ marginBottom: 4 }}>
-      {/* Activity header */}
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
@@ -197,7 +174,6 @@ export function ToolGroup({ parts }: { parts: Part[] }) {
         )}
       </button>
 
-      {/* Flat tool rows */}
       {open && (
         <div style={{ paddingLeft: 8, borderLeft: '2px solid var(--bg-4)', display: 'flex', flexDirection: 'column', gap: 1 }}>
           {parts.map(p => (
@@ -207,4 +183,4 @@ export function ToolGroup({ parts }: { parts: Part[] }) {
       )}
     </div>
   );
-}
+});

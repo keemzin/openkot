@@ -4,7 +4,7 @@ import { gitStatusColor, gitStatusLabel } from '../../utils/gitUtils';
 import { fileColor, getFileExt } from '../../utils/fileUtils';
 import { InlineInput } from './InlineInput';
 
-export function FileTreeNode({ entry, depth, onFileClick, selectedPath, showHidden, onContextMenu, inlineEdit, onInlineConfirm, onInlineCancel, refreshKey, gitStatus, folderBadge, getFileGitStatus, getFolderBadge }: {
+export const FileTreeNode = React.memo(function FileTreeNode({ entry, depth, onFileClick, selectedPath, showHidden, onContextMenu, inlineEdit, onInlineConfirm, onInlineCancel, refreshKey, gitStatus, folderBadge, getFileGitStatus, getFolderBadge }: {
   entry: FsEntry; depth: number; onFileClick: (p: string) => void; selectedPath: string | null;
   showHidden: boolean; onContextMenu: (e: React.MouseEvent, entry: FsEntry) => void;
   inlineEdit: InlineEdit | null; onInlineConfirm: (v: string) => void; onInlineCancel: () => void;
@@ -116,4 +116,4 @@ export function FileTreeNode({ entry, depth, onFileClick, selectedPath, showHidd
       )}
     </div>
   );
-}
+});
