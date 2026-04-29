@@ -136,8 +136,10 @@ export const CodeEditor = forwardRef<CodeEditorRef, Props>(({ value, onChange, o
         ]),
         getLanguage(fileName),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            onChange(update.doc.toString());
+          if (update.docChanged && viewRef.current) {
+            const newContent = viewRef.current.state.doc.toString();
+            console.log('CodeMirror update, new content length:', newContent.length);
+            onChange(newContent);
           }
         }),
         EditorView.theme({
