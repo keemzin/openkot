@@ -120,6 +120,10 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
     setNewProvider({ name: '', displayName: '', npm: '@ai-sdk/openai-compatible', baseUrl: '', apiKey: '', models: [], environment: {} });
     setNewModelInput('');
     setNewEnvInput('');
+
+    // Gracefully reload OpenCode to make new provider available
+    await fetch('/restart', { method: 'POST' }).catch(() => {});
+    window.location.reload();
   };
 
   const deleteCustomProvider = async (name: string) => {
