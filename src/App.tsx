@@ -1108,6 +1108,7 @@ function App() {
   const [ctxPopoverOpen, setCtxPopoverOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeId>(loadTheme);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
+  const [revertConfirm, setRevertConfirm] = useState<{ messageId: string; affectedFiles: string[] } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const toggleTheme = () => {
@@ -1472,22 +1473,46 @@ function App() {
   }, [loadSessions, loadSessionMessages]);
 
   const revertSession = useCallback(async (messageId: string) => {
+    // Collect files touched by messages after the revert point
+    const idx = messages.findIndex(m => m.id === messageId);
+    const affectedMsgs = idx >= 0 ? messages.slice(idx) : [];
+    const fileSet = new Set<string>();
+    for (const m of affectedMsgs) {
+      const parts = partsMap[m.id] ?? [];
+      for (const p of parts) {
+        const toolName = (p.tool as string) || p.type;
+        const isFileWrite = toolName === 'write' || toolName === 'edit' || toolName === 'patch';
+        if (isFileWrite) {
+          // File path lives inside state.input (same as ToolPart.tsx reads it)
+          const input = (p.state as any)?.input ?? p.input ?? {};
+          const filePath = (input as any).filePath ?? (input as any).file_path ?? (input as any).path;
+          if (filePath) fileSet.add(filePath);
+        }
+      }
+    }
+    setRevertConfirm({ messageId, affectedFiles: Array.from(fileSet) });
+  }, [messages, partsMap]);
+
+  const doRevert = useCallback(async (messageId: string) => {
     const sid = sessionIdRef.current;
     if (!sid) return;
     const dir = getWorkingDir();
-    // Optimistically remove messages at and after the revert point
+    // Optimistically remove messages at and after the revert point — do NOT reload after
     setMessages(prev => {
       const idx = prev.findIndex(m => m.id === messageId);
       return idx >= 0 ? prev.slice(0, idx) : prev;
     });
     setPartsMap(prev => {
-      const next = { ...prev };
-      // We don't know which keys to remove without the old messages list,
-      // so we'll let the reload clean it up
+      // Remove parts for messages at/after revert point
+      const keepIds = new Set(messages.slice(0, messages.findIndex(m => m.id === messageId)).map(m => m.id));
+      const next: Record<string, Part[]> = {};
+      for (const k of Object.keys(prev)) {
+        if (keepIds.has(k)) next[k] = prev[k];
+      }
       return next;
     });
     try {
-      const r = await fetch(
+      await fetch(
         `/api/session/${encodeURIComponent(sid)}/revert?directory=${encodeURIComponent(dir)}`,
         {
           method: 'POST',
@@ -1495,18 +1520,9 @@ function App() {
           body: JSON.stringify({ messageID: messageId }),
         }
       );
-      if (!r.ok) {
-        // Rollback — reload authoritative state
-        await loadSessionMessages(sid);
-        return;
-      }
-    } catch {
-      await loadSessionMessages(sid);
-      return;
-    }
-    // Reload to get authoritative state from server
-    await loadSessionMessages(sid);
-  }, [loadSessionMessages]);
+      // Don't reload — keep optimistic state. Server marks them reverted but still returns them.
+    } catch { /* ignore — optimistic state already applied */ }
+  }, [messages, loadSessionMessages]);
 
   const listenToSession = useCallback((sid: string, tempAssistantId: string, isOngoing: boolean = false) => {
     if (eventSourceRef.current) eventSourceRef.current.close();
@@ -2867,6 +2883,56 @@ function App() {
       )}
 
       {dirPickerOpen && <DirPicker current={workingDir} rootDir={rootDirRef.current || workingDir} onSwitch={switchDirectory} onClose={() => setDirPickerOpen(false)} />}
+
+      {/* Revert confirmation dialog */}
+      {revertConfirm && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.55)' }}
+          onClick={() => setRevertConfirm(null)}>
+          <div style={{ background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 12, padding: '24px 28px', maxWidth: 420, width: '90%', boxShadow: '0 8px 32px rgba(0,0,0,0.4)' }}
+            onClick={e => e.stopPropagation()}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--red, #e06c75)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M3 7v6h6"/><path d="M3 13C5.33 7.67 10.67 4 17 4a9 9 0 0 1 0 18H3"/>
+              </svg>
+              <span style={{ fontWeight: 600, fontSize: 15, color: 'var(--text)' }}>Revert to this message?</span>
+            </div>
+            <p style={{ fontSize: 13, color: 'var(--text-3)', margin: '0 0 16px', lineHeight: 1.6 }}>
+              All messages and file changes after this point will be undone.
+            </p>
+            {revertConfirm.affectedFiles.length > 0 && (
+              <div style={{ marginBottom: 18 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-4)', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Files that will be reverted
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 160, overflowY: 'auto' }}>
+                  {revertConfirm.affectedFiles.map(f => (
+                    <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 10px', background: 'var(--bg-3)', borderRadius: 6, fontSize: 12, fontFamily: 'var(--font-mono, monospace)', color: 'var(--text-2)' }}>
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--yellow, #e5c07b)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                      {f.replace(/\\/g, '/').split('/').pop()}
+                      <span style={{ color: 'var(--text-5)', fontSize: 10, marginLeft: 'auto', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 180 }}>{f.replace(/\\/g, '/')}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {revertConfirm.affectedFiles.length === 0 && (
+              <div style={{ marginBottom: 18, fontSize: 12, color: 'var(--text-4)', fontStyle: 'italic' }}>
+                No file changes detected after this message.
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+              <button onClick={() => setRevertConfirm(null)} style={{
+                padding: '7px 16px', borderRadius: 7, border: '1px solid var(--border)', background: 'transparent',
+                color: 'var(--text-3)', cursor: 'pointer', fontSize: 13,
+              }}>Cancel</button>
+              <button onClick={() => { const id = revertConfirm.messageId; setRevertConfirm(null); doRevert(id); }} style={{
+                padding: '7px 16px', borderRadius: 7, border: 'none', background: 'var(--red, #e06c75)',
+                color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600,
+              }}>Revert</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <style>{`
         @keyframes spin { to { transform: rotate(360deg); } }
