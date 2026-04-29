@@ -1193,6 +1193,12 @@ async function start() {
       const { name: _, ...serverConfig } = req.body;
       config.mcp[name] = serverConfig;
       await writeConfig(config);
+      // Reload MCP servers without disrupting UI
+      fetch(`http://localhost:${OPENCODE_PORT}/mcp`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mcp: config.mcp }),
+      }).catch(err => console.error('[MCP reload] Failed to reload MCP:', err));
       res.json({ success: true });
     } catch (error) {
       console.error('[API] POST /api/config/mcp error:', error);
@@ -1212,6 +1218,12 @@ async function start() {
         console.log('[API] Updated MCP:', updated);
         config.mcp[name] = updated;
         await writeConfig(config);
+        // Reload MCP servers without disrupting UI
+        fetch(`http://localhost:${OPENCODE_PORT}/mcp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mcp: config.mcp }),
+        }).catch(err => console.error('[MCP reload] Failed to reload MCP:', err));
         res.json({ success: true });
       } else {
         res.status(404).json({ error: 'Not found' });
@@ -1229,6 +1241,12 @@ async function start() {
       if (config.mcp?.[name]) {
         delete config.mcp[name];
         await writeConfig(config);
+        // Reload MCP servers without disrupting UI
+        fetch(`http://localhost:${OPENCODE_PORT}/mcp`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mcp: config.mcp }),
+        }).catch(err => console.error('[MCP reload] Failed to reload MCP:', err));
         res.json({ success: true });
       } else {
         res.status(404).json({ error: 'Not found' });
