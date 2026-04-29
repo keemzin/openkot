@@ -22,13 +22,21 @@ interface CustomProvider {
   environment?: Record<string, string>; // environment variables
 }
 
+interface Command {
+  file: string;
+  name: string;
+  description: string;
+  agent: string;
+  content: string;
+}
+
 interface SettingsDialogProps {
   onClose: () => void;
   models: ModelInfo[];
 }
 
 export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
-  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models'>('mcp');
+  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'commands'>('mcp');
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingMcp, setEditingMcp] = useState<McpServer | null>(null);
@@ -41,6 +49,14 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
   const [newModelInput, setNewModelInput] = useState('');
   const [newEnvInput, setNewEnvInput] = useState('');
   const [providerLoading, setProviderLoading] = useState(false);
+
+  // Commands tab state
+  const [commands, setCommands] = useState<Command[]>([]);
+  const [showAddCommand, setShowAddCommand] = useState(false);
+  const [editingCommand, setEditingCommand] = useState<Command | null>(null);
+  const [newCommand, setNewCommand] = useState<Command>({ file: '', name: '', description: '', agent: 'build', content: '' });
+  const [commandLoading, setCommandLoading] = useState(false);
+  const [editingCommandDraft, setEditingCommandDraft] = useState<Command | null>(null);
 
   useEffect(() => {
     fetch('/api/config/mcp')
@@ -60,6 +76,13 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
       .then(async r => { if (!r.ok) return []; try { return await r.json(); } catch { return []; } })
       .then(data => { if (Array.isArray(data)) setCustomProviders(data); setProviderLoading(false); })
       .catch(() => setProviderLoading(false));
+
+    // Load commands
+    setCommandLoading(true);
+    fetch('/api/config/commands')
+      .then(async r => { if (!r.ok) return []; try { return await r.json(); } catch { return []; } })
+      .then(data => { if (Array.isArray(data)) setCommands(data); setCommandLoading(false); })
+      .catch(() => setCommandLoading(false));
   }, []);
 
   const [isMobile, setIsMobile] = useState(false);
@@ -131,6 +154,29 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
     setCustomProviders(prev => prev.filter(p => p.name !== name));
   };
 
+  const saveCommand = async (command: Command) => {
+    const file = command.file || `${command.name.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.md`;
+    await fetch(`/api/config/commands/${encodeURIComponent(file)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(command),
+    });
+    setCommands(prev => {
+      const idx = prev.findIndex(c => c.file === file);
+      const updated = { ...command, file };
+      if (idx >= 0) { const next = [...prev]; next[idx] = updated; return next; }
+      return [...prev, updated];
+    });
+    setShowAddCommand(false);
+    setEditingCommand(null);
+    setNewCommand({ file: '', name: '', description: '', agent: 'build', content: '' });
+  };
+
+  const deleteCommand = async (file: string) => {
+    await fetch(`/api/config/commands/${encodeURIComponent(file)}`, { method: 'DELETE' });
+    setCommands(prev => prev.filter(c => c.file !== file));
+  };
+
   const saveSettings = async () => {
     for (const server of mcpServers) {
       try {
@@ -175,6 +221,45 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
     }
 
     onClose();
+  };
+
+  const CommandEditor = ({ command, onSave, onCancel }: { command: Command; onSave: (cmd: Command) => void; onCancel: () => void }) => {
+    const [draft, setDraft] = useState(command);
+    useEffect(() => setDraft(command), [command]);
+    return (
+      <div style={{ padding: 12, background: 'var(--bg-2)', borderRadius: 6, marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', margin: 0 }}>Edit Command</h4>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Name</label>
+            <input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder="Command name"
+              style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Agent</label>
+            <select value={draft.agent} onChange={e => setDraft({ ...draft, agent: e.target.value })}
+              style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }}>
+              <option value="build">build</option>
+              <option value="plan">plan</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Description</label>
+          <input value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} placeholder="Brief description"
+            style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
+        </div>
+        <div>
+          <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Content (Markdown)</label>
+          <textarea value={draft.content} onChange={e => setDraft({ ...draft, content: e.target.value })} placeholder="Command implementation in Markdown"
+            rows={8} style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace' }} />
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => onSave(draft)} style={{ padding: '5px 10px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}>Save</button>
+          <button onClick={onCancel} style={{ padding: '5px 10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
+        </div>
+      </div>
+    );
   };
 
   return (
@@ -228,6 +313,18 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
               borderLeft: !isMobile && selectedPage === 'models' ? '2px solid var(--accent)' : 'none',
               borderBottom: isMobile && selectedPage === 'models' ? '2px solid var(--accent)' : 'none'
             }}>Models</button>
+            <button onClick={() => setSelectedPage('commands')} style={{
+              width: isMobile ? 'auto' : '100%',
+              padding: isMobile ? '8px 12px' : '8px 16px',
+              background: selectedPage === 'commands' ? 'var(--bg-2)' : 'transparent',
+              border: 'none',
+              color: 'var(--text)',
+              fontSize: 14,
+              cursor: 'pointer',
+              textAlign: 'left',
+              borderLeft: !isMobile && selectedPage === 'commands' ? '2px solid var(--accent)' : 'none',
+              borderBottom: isMobile && selectedPage === 'commands' ? '2px solid var(--accent)' : 'none'
+            }}>Commands</button>
           </div>
           <div style={{ flex: 1, padding: isMobile ? '16px' : '20px', overflowY: 'auto' }}>
             {selectedPage === 'mcp' && (
@@ -411,6 +508,41 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
                     </div>
                   )}
                 </div>
+              </div>
+            )}
+
+            {selectedPage === 'commands' && (
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)' }}>Slash Commands</h3>
+                  <button onClick={() => setShowAddCommand(true)} style={{ padding: '4px 8px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}>Add</button>
+                </div>
+                {showAddCommand && (
+                  <CommandEditor command={newCommand} onSave={saveCommand} onCancel={() => { setShowAddCommand(false); setNewCommand({ file: '', name: '', description: '', agent: 'build', content: '' }); }} />
+                )}
+                {editingCommand && (
+                  <CommandEditor command={editingCommand} onSave={(cmd) => { saveCommand(cmd); setEditingCommand(null); setEditingCommandDraft(null); }} onCancel={() => { setEditingCommand(null); setEditingCommandDraft(null); }} />
+                )}
+                {commandLoading ? (
+                  <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Loading...</div>
+                ) : commands.length === 0 ? (
+                  <div style={{ fontSize: 13, color: 'var(--text-3)' }}>No commands configured.</div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {commands.map(cmd => (
+                      <div key={cmd.file} style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 4 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{cmd.name}</span>
+                          <span style={{ fontSize: 10, color: 'var(--text-4)', background: 'var(--bg-3)', padding: '1px 6px', borderRadius: 3 }}>{cmd.agent}</span>
+                          <button onClick={() => setEditingCommand(cmd)} style={{ padding: '3px 8px', background: 'var(--accent)', border: 'none', borderRadius: 3, color: 'white', cursor: 'pointer', fontSize: 11 }}>Edit</button>
+                          <button onClick={() => deleteCommand(cmd.file)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Delete</button>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 2 }}>{cmd.description}</div>
+                        <div style={{ fontSize: 11, color: 'var(--text-4)', whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>{cmd.content.slice(0, 100)}{cmd.content.length > 100 ? '...' : ''}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>        </div>

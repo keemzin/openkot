@@ -1266,6 +1266,83 @@ async function start() {
     ]);
   });
 
+  // Commands management
+  app.get('/api/config/commands', (req, res) => {
+    try {
+      const commandsDir = path.join(PROJECT_ROOT, '.opencode', 'commands');
+      if (!fs.existsSync(commandsDir)) return res.json([]);
+      const files = fs.readdirSync(commandsDir).filter(f => f.endsWith('.md'));
+      const commands = files.map(f => {
+        const content = fs.readFileSync(path.join(commandsDir, f), 'utf8');
+        const lines = content.split('\n');
+        const frontmatter = {};
+        let inFrontmatter = false;
+        let bodyStart = 0;
+        for (let i = 0; i < lines.length; i++) {
+          const line = lines[i];
+          if (line.trim() === '---') {
+            if (!inFrontmatter) {
+              inFrontmatter = true;
+            } else {
+              bodyStart = i + 1;
+              break;
+            }
+          } else if (inFrontmatter) {
+            const colon = line.indexOf(':');
+            if (colon > 0) {
+              const key = line.slice(0, colon).trim();
+              const value = line.slice(colon + 1).trim();
+              frontmatter[key] = value;
+            }
+          }
+        }
+        return {
+          file: f,
+          name: frontmatter.name || f.replace('.md', ''),
+          description: frontmatter.description || '',
+          agent: frontmatter.agent || 'build',
+          content: lines.slice(bodyStart).join('\n').trim(),
+        };
+      });
+      res.json(commands);
+    } catch (e) {
+      res.json([]);
+    }
+  });
+
+  app.post('/api/config/commands/:file', jsonBody, async (req, res) => {
+    try {
+      const { file } = req.params;
+      const { name, description, agent, content } = req.body;
+      const commandsDir = path.join(PROJECT_ROOT, '.opencode', 'commands');
+      if (!fs.existsSync(commandsDir)) fs.mkdirSync(commandsDir, { recursive: true });
+      const filePath = path.join(commandsDir, file);
+      const frontmatter = `---
+name: ${name}
+description: ${description}
+agent: ${agent}
+---
+
+${content}`;
+      fs.writeFileSync(filePath, frontmatter, 'utf8');
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  app.delete('/api/config/commands/:file', async (req, res) => {
+    try {
+      const { file } = req.params;
+      const commandsDir = path.join(PROJECT_ROOT, '.opencode', 'commands');
+      const filePath = path.join(commandsDir, file);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
   // Custom providers CRUD — stored in opencode.jsonc under "provider" key
   app.get('/api/config/providers/custom', (req, res) => {
     try {
