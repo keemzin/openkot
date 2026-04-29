@@ -132,10 +132,14 @@ export function FileViewer({ path: filePath, onClose, workingDir }: Props) {
   const ext = getFileExt(fileName);
   const isMarkdown = ext === 'md';
   const isImage = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico'].includes(ext);
-  
+
   // Block dangerous/binary file types
   const dangerousExts = ['exe', 'dll', 'so', 'dylib', 'bin', 'zip', 'tar', 'gz', 'rar', '7z', 'iso', 'dmg', 'pkg', 'deb', 'rpm', 'msi', 'lock'];
   const isDangerous = dangerousExts.includes(ext);
+
+  // Compute relative path for API calls (server expects paths relative to workingDir)
+  const normalizedWorkingDir = workingDir.replace(/\\/g, '/').replace(/\/$/, '');
+  const relativePath = filePath.replace(normalizedWorkingDir + '/', '').replace(/\\/g, '/');
   
   const isDirty = mode === 'edit' && content !== null && draftContent.replace(/\r\n/g, '\n') !== content.replace(/\r\n/g, '\n');
 
@@ -150,7 +154,7 @@ export function FileViewer({ path: filePath, onClose, workingDir }: Props) {
       setLoading(false);
       return;
     }
-    fetch(`/api/fs/read?path=${encodeURIComponent(filePath)}`)
+    fetch(`/api/fs/read?path=${encodeURIComponent(relativePath)}`)
       .then(r => { 
         if (!r.ok) throw new Error(`${r.status}`);
         const size = Number(r.headers.get('content-length') || 0);
@@ -168,22 +172,26 @@ export function FileViewer({ path: filePath, onClose, workingDir }: Props) {
   }, [filePath]);
 
   const save = useCallback(async (text: string) => {
+    console.log('Saving to', relativePath, 'content length', text.length);
     setSaving(true);
     try {
       const r = await fetch('/api/fs/write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: filePath, content: text }),
+        body: JSON.stringify({ path: relativePath, content: text }),
       });
+      console.log('Save response', r.status);
       if (!r.ok) throw new Error('Save failed');
+      console.log('Saved successfully');
       setContent(text);
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
-    } catch {
+    } catch (e) {
+      console.log('Save failed', e);
       setSaveStatus('error');
     }
     setSaving(false);
-  }, [filePath]);
+  }, [relativePath]);
 
   const handleChange = (val: string) => {
     setDraftContent(val);
@@ -316,7 +324,7 @@ export function FileViewer({ path: filePath, onClose, workingDir }: Props) {
             {isImage ? (
               <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: 300, padding: 20 }}>
                 <img 
-                  src={`/api/fs/read?path=${encodeURIComponent(filePath)}`} 
+                  src={`/api/fs/read?path=${encodeURIComponent(relativePath)}`} 
                   alt={fileName}
                   style={{ 
                     maxWidth: '100%', 
