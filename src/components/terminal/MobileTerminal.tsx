@@ -22,7 +22,11 @@ const getTheme = () => {
   };
 };
 
+const QUICKKEYS_H = 44;
+const STATUS_BAR_H = 26;
+
 export function MobileTerminal({ workingDir }: { workingDir: string }) {
+  const rootRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -31,33 +35,62 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
   const termSessionIdRef = useRef<string | null>(null);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [fontSize, setFontSize] = useState(13);
 
+  // availableH = visual viewport height minus this component's top offset.
+  // This correctly accounts for the app header + tab bar above us.
+  const [availableH, setAvailableH] = useState(400);
+
   useEffect(() => {
-    const vv = window.visualViewport;
-    if (!vv) return;
-    const update = () => {
-      const hidden = window.innerHeight - vv.height - vv.offsetTop;
-      setKeyboardHeight(Math.max(0, hidden));
+    const measure = () => {
+      const vv = window.visualViewport;
+      const vpH = vv ? vv.height : window.innerHeight;
+      const el = rootRef.current;
+      if (!el) { setAvailableH(vpH); return; }
+      // getBoundingClientRect().top gives us how far down the page this element starts
+      const top = el.getBoundingClientRect().top;
+      setAvailableH(Math.max(200, vpH - top));
     };
-    vv.addEventListener('resize', update);
-    vv.addEventListener('scroll', update);
-    update();
-    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
+
+    measure();
+
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener('resize', measure);
+      vv.addEventListener('scroll', measure);
+    }
+    window.addEventListener('resize', measure);
+
+    return () => {
+      if (vv) {
+        vv.removeEventListener('resize', measure);
+        vv.removeEventListener('scroll', measure);
+      }
+      window.removeEventListener('resize', measure);
+    };
   }, []);
+
+  // Re-fit xterm whenever available height changes
+  useEffect(() => {
+    requestAnimationFrame(() => { try { fitAddonRef.current?.fit(); } catch {} });
+  }, [availableH]);
 
   const sendInput = useCallback((data: string) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(data);
   }, []);
 
-  // Pinch-to-zoom for terminal font size
+  // Pinch-to-zoom
   useEffect(() => {
     const el = containerRef.current; if (!el) return;
     let lastDist = 0, pinching = false;
     const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
     const onTS = (e: TouchEvent) => { if (e.touches.length === 2) { pinching = true; lastDist = dist(e.touches); } else pinching = false; };
-    const onTM = (e: TouchEvent) => { if (!pinching || e.touches.length !== 2) return; e.preventDefault(); const d = dist(e.touches); const delta = d - lastDist; lastDist = d; if (Math.abs(delta) > 1) setFontSize(p => Math.min(24, Math.max(9, p + delta * 0.04))); };
+    const onTM = (e: TouchEvent) => {
+      if (!pinching || e.touches.length !== 2) return;
+      e.preventDefault();
+      const d = dist(e.touches); const delta = d - lastDist; lastDist = d;
+      if (Math.abs(delta) > 1) setFontSize(p => Math.min(24, Math.max(9, p + delta * 0.04)));
+    };
     const onTE = () => { pinching = false; };
     el.addEventListener('touchstart', onTS, { passive: true });
     el.addEventListener('touchmove', onTM, { passive: false });
@@ -65,6 +98,28 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
     return () => { el.removeEventListener('touchstart', onTS); el.removeEventListener('touchmove', onTM); el.removeEventListener('touchend', onTE); };
   }, []);
 
+  // Single-finger scroll → xterm.scrollLines
+  useEffect(() => {
+    const el = containerRef.current; if (!el) return;
+    let startY = 0, accumulated = 0;
+    const onTS = (e: TouchEvent) => { if (e.touches.length === 1) { startY = e.touches[0].clientY; accumulated = 0; } };
+    const onTM = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return;
+      const term = terminalRef.current; if (!term) return;
+      const dy = startY - e.touches[0].clientY;
+      startY = e.touches[0].clientY;
+      accumulated += dy;
+      const lineH = (term.options.fontSize ?? 13) * 1.2;
+      const lines = Math.round(accumulated / lineH);
+      if (lines !== 0) { accumulated -= lines * lineH; term.scrollLines(lines); }
+      e.preventDefault();
+    };
+    el.addEventListener('touchstart', onTS, { passive: true });
+    el.addEventListener('touchmove', onTM, { passive: false });
+    return () => { el.removeEventListener('touchstart', onTS); el.removeEventListener('touchmove', onTM); };
+  }, []);
+
+  // WebSocket
   useEffect(() => {
     let disposed = false;
     let socket: WebSocket | null = null;
@@ -115,50 +170,33 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
       } catch (e) { if (!disposed) setError(e instanceof Error ? e.message : 'Failed'); }
     };
     init();
-    return () => {
-      disposed = true;
-      socket?.close();
-      wsRef.current = null;
-      termSessionIdRef.current = null;
-    };
+    return () => { disposed = true; socket?.close(); wsRef.current = null; termSessionIdRef.current = null; };
   }, [workingDir]);
 
+  // xterm init
   useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+    const container = containerRef.current; if (!container) return;
     const terminal = new Terminal({
-      cursorBlink: true,
-      fontSize,
+      cursorBlink: true, fontSize,
       fontFamily: '"IBM Plex Mono", monospace',
-      scrollback: 10_000,
-      theme: getTheme(),
+      scrollback: 10_000, theme: getTheme(),
     });
     const fitAddon = new FitAddon();
     terminal.loadAddon(fitAddon);
     terminal.open(container);
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
-
     try { fitAddon.fit(); } catch {}
-    return () => {
-      terminal.dispose();
-      terminalRef.current = null;
-      fitAddonRef.current = null;
-    };
+    return () => { terminal.dispose(); terminalRef.current = null; fitAddonRef.current = null; };
   }, [sendInput]);
 
-  // Update font size
   useEffect(() => {
-    if (terminalRef.current) {
-      terminalRef.current.options.fontSize = fontSize;
-      fitAddonRef.current?.fit();
-    }
+    if (terminalRef.current) { terminalRef.current.options.fontSize = fontSize; fitAddonRef.current?.fit(); }
   }, [fontSize]);
 
   const handleStopTerminal = useCallback(async () => {
     await stopTerminalForDir(workingDir);
-    setConnected(false);
-    setError(null);
+    setConnected(false); setError(null);
     termSessionIdRef.current = null;
     terminalRef.current?.reset();
   }, [workingDir]);
@@ -172,11 +210,22 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
     { label: 'Stop', action: handleStopTerminal },
   ];
 
-  const QUICKKEYS_H = 44;
+  // xterm output height = total available - status bar - quickkeys
+  const xtermH = Math.max(100, availableH - STATUS_BAR_H - QUICKKEYS_H);
 
   return (
-    <div style={{ height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'stretch', background: 'var(--bg)', padding: '16px' }}>
-      <div style={{ maxWidth: '800px', width: '100%', display: 'flex', flexDirection: 'column', border: '1px solid var(--border-2)', borderRadius: '8px', overflow: 'hidden' }}>
+    <div
+      ref={rootRef}
+      style={{
+        // Exact pixel height = visual viewport minus our top offset
+        height: availableH,
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+        background: 'var(--bg)',
+      }}
+    >
+      {/* Hidden textarea for keyboard capture */}
       <textarea
         ref={inputRef}
         tabIndex={-1}
@@ -187,91 +236,84 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
         disabled={!connected}
         onKeyDown={(e) => {
           e.stopPropagation();
-          if (e.key === 'Enter') {
-            e.preventDefault();
-            sendInput('\r');
-            e.currentTarget.value = '';
-            return;
-          }
-          if (e.key === 'Backspace') {
-            e.preventDefault();
-            sendInput('\x7f');
-            return;
-          }
-          if (e.key.length === 1) {
-            e.preventDefault();
-            sendInput(e.key);
-          }
+          if (e.key === 'Enter') { e.preventDefault(); sendInput('\r'); e.currentTarget.value = ''; return; }
+          if (e.key === 'Backspace') { e.preventDefault(); sendInput('\x7f'); return; }
+          if (e.key.length === 1) { e.preventDefault(); sendInput(e.key); }
         }}
         onInput={(e) => {
           const val = e.currentTarget.value;
-          if (val) {
-            sendInput(val.replace(/\r\n|\r|\n/g, '\r'));
-            e.currentTarget.value = '';
-          }
+          if (val) { sendInput(val.replace(/\r\n|\r|\n/g, '\r')); e.currentTarget.value = ''; }
         }}
         style={{
           position: 'fixed', left: '-9999px', top: '-9999px',
-          width: 1, height: 1, opacity: 0,
-          fontSize: 16,
+          width: 1, height: 1, opacity: 0, fontSize: 16,
           border: 'none', outline: 'none', resize: 'none',
           background: 'transparent', color: 'transparent',
           caretColor: 'transparent', padding: 0, margin: 0,
         }}
       />
-      <div style={{ padding: '4px 12px', borderBottom: '1px solid var(--border)', fontSize: 11, color: 'var(--text-4)', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+
+      {/* Status bar */}
+      <div style={{
+        height: STATUS_BAR_H,
+        padding: '0 12px',
+        borderBottom: '1px solid var(--border)',
+        fontSize: 11, color: 'var(--text-4)',
+        display: 'flex', alignItems: 'center', gap: 6,
+        flexShrink: 0,
+      }}>
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: connected ? 'var(--green)' : error ? 'var(--red)' : 'var(--text-5)' }} />
         <span>{connected ? 'Terminal' : error ?? 'Connecting…'}</span>
       </div>
+
+      {/* xterm output — explicit pixel height, never overflows into quickkeys */}
       <div
         ref={containerRef}
         onClick={() => inputRef.current?.focus()}
         style={{
-          height: `calc(100% - ${QUICKKEYS_H + keyboardHeight + 8}px)`,
-          minWidth: 0,
+          height: xtermH,
+          flexShrink: 0,
           cursor: 'text',
+          overflow: 'hidden',
         }}
       />
-      {connected && (
-        <div style={{
-          position: 'fixed',
-          bottom: keyboardHeight,
-          left: 0, right: 0,
-          height: QUICKKEYS_H,
-          display: 'flex', alignItems: 'center',
-          gap: 6, padding: '0 10px',
-          background: 'var(--bg-2)',
-          borderTop: '1px solid var(--border)',
-          overflowX: 'auto',
-          zIndex: 100,
-        }}>
-          {mobileKeys.map((key) => (
-            <button
-              key={key.label}
-              onPointerDown={(e) => {
-                e.preventDefault();
-                if ('action' in key) key.action();
-                else sendInput(key.seq);
-                inputRef.current?.focus();
-              }}
-              style={{
-                flexShrink: 0,
-                padding: '6px 14px',
-                borderRadius: 6,
-                background: 'var(--bg-3)',
-                border: '1px solid var(--border-2)',
-                color: 'var(--text-2)',
-                fontSize: 13,
-                fontWeight: 500,
-                cursor: 'pointer',
-                fontFamily: 'monospace',
-              }}
-            >
-              {key.label}
-            </button>
-          ))}
-        </div>
-      )}
+
+      {/* Quickkeys — pinned at bottom, always visible above keyboard */}
+      <div style={{
+        height: QUICKKEYS_H,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '0 10px',
+        background: 'var(--bg-2)',
+        borderTop: '1px solid var(--border)',
+        overflowX: 'auto',
+        flexShrink: 0,
+        scrollbarWidth: 'none' as any,
+      }}>
+        {mobileKeys.map((key) => (
+          <button
+            key={key.label}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              if ('action' in key) key.action();
+              else sendInput(key.seq);
+              inputRef.current?.focus();
+            }}
+            style={{
+              flexShrink: 0,
+              padding: '6px 14px',
+              borderRadius: 6,
+              background: 'var(--bg-3)',
+              border: '1px solid var(--border-2)',
+              color: 'var(--text-2)',
+              fontSize: 13, fontWeight: 500,
+              cursor: 'pointer', fontFamily: 'monospace',
+            }}
+          >
+            {key.label}
+          </button>
+        ))}
       </div>
     </div>
   );

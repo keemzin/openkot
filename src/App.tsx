@@ -2438,7 +2438,9 @@ function App() {
 
         {/* Persistent terminal ” always mounted when workingDir exists */}
         {workingDir && activeTab === 'terminal' && (
-          <Terminal workingDir={workingDir} />
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, overflow: 'hidden' }}>
+            <Terminal workingDir={workingDir} />
+          </div>
         )}
 
         {/* Messages or Plan view */}
