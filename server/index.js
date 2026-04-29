@@ -1278,6 +1278,7 @@ async function start() {
         baseUrl: cfg.options?.baseURL || '',
         apiKey: cfg.options?.apiKey || '',
         models: Object.keys(cfg.models || {}),
+        environment: cfg.environment || {},
       }));
       res.json(list);
     } catch (e) {
@@ -1288,7 +1289,7 @@ async function start() {
   app.post('/api/config/providers/custom/:name', jsonBody, async (req, res) => {
     try {
       const { name } = req.params;
-      const { displayName, npm, baseUrl, apiKey, models } = req.body;
+      const { displayName, npm, baseUrl, apiKey, models, environment } = req.body;
       const config = readConfig();
       config.provider = config.provider || {};
 
@@ -1305,6 +1306,7 @@ async function start() {
         npm: npm || '@ai-sdk/openai-compatible',
         options: { baseURL: baseUrl, ...(apiKey ? { apiKey } : {}) },
         models: modelsObj,
+        ...(environment && Object.keys(environment).length > 0 ? { environment } : {}),
       };
 
       config.provider[name] = entry;

@@ -19,6 +19,7 @@ interface CustomProvider {
   baseUrl?: string;    // options.baseURL
   apiKey?: string;     // options.apiKey
   models?: string[];   // model IDs
+  environment?: Record<string, string>; // environment variables
 }
 
 interface SettingsDialogProps {
@@ -36,8 +37,9 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
   // Models tab state
   const [customProviders, setCustomProviders] = useState<CustomProvider[]>([]);
   const [showAddProvider, setShowAddProvider] = useState(false);
-  const [newProvider, setNewProvider] = useState<CustomProvider>({ name: '', displayName: '', npm: '@ai-sdk/openai-compatible', baseUrl: '', apiKey: '', models: [] });
+  const [newProvider, setNewProvider] = useState<CustomProvider>({ name: '', displayName: '', npm: '@ai-sdk/openai-compatible', baseUrl: '', apiKey: '', models: [], environment: {} });
   const [newModelInput, setNewModelInput] = useState('');
+  const [newEnvInput, setNewEnvInput] = useState('');
   const [providerLoading, setProviderLoading] = useState(false);
 
   useEffect(() => {
@@ -86,6 +88,22 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
     setMcpServers(prev => prev.filter(s => s.name !== name));
   };
 
+  const fetchModelsFromProvider = async (baseUrl: string, apiKey?: string) => {
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+      const url = new URL('/v1/models', baseUrl).href;
+      const res = await fetch(url, { headers });
+      if (!res.ok) throw new Error('Failed to fetch models');
+      const data = await res.json();
+      const models = data.data?.map((m: any) => m.id) || [];
+      return models;
+    } catch (e) {
+      console.error('Error fetching models:', e);
+      return [];
+    }
+  };
+
   const saveCustomProvider = async (provider: CustomProvider) => {
     await fetch(`/api/config/providers/custom/${encodeURIComponent(provider.name)}`, {
       method: 'POST',
@@ -98,8 +116,10 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
       return [...prev, provider];
     });
     setShowAddProvider(false);
-    setNewProvider({ name: '', apiKey: '', baseUrl: '', models: [] });
+
+    setNewProvider({ name: '', displayName: '', npm: '@ai-sdk/openai-compatible', baseUrl: '', apiKey: '', models: [], environment: {} });
     setNewModelInput('');
+    setNewEnvInput('');
   };
 
   const deleteCustomProvider = async (name: string) => {
@@ -313,23 +333,45 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
                           type="password"
                           style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
                       </div>
-                      <div>
-                        <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Models (one per line or comma-separated)</label>
-                        <textarea value={newModelInput} onChange={e => setNewModelInput(e.target.value)}
-                          placeholder="gemini-2.5-flash&#10;llama3.2&#10;mistral"
-                          rows={3}
-                          style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace' }} />
-                        <div style={{ fontSize: 10, color: 'var(--text-4)', marginTop: 2 }}>Each model ID becomes both the key and display name</div>
-                      </div>
+                       <div>
+                         <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Environment Variables (KEY=VALUE, one per line)</label>
+                         <textarea value={newEnvInput} onChange={e => setNewEnvInput(e.target.value)}
+                           placeholder="API_KEY=your-key&#10;DEBUG=true"
+                           rows={2}
+                           style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace' }} />
+                       </div>
+                       <div>
+                         <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Models (one per line or comma-separated)</label>
+                         <textarea value={newModelInput} onChange={e => setNewModelInput(e.target.value)}
+                           placeholder="gemini-2.5-flash&#10;llama3.2&#10;mistral"
+                           rows={3}
+                           style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace' }} />
+                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                           <button
+                             onClick={async () => {
+                               if (!newProvider.baseUrl) return;
+                               const models = await fetchModelsFromProvider(newProvider.baseUrl, newProvider.apiKey);
+                               setNewModelInput(models.join('\n'));
+                             }}
+                             disabled={!newProvider.baseUrl}
+                             style={{ padding: '3px 8px', background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 3, color: 'var(--text-2)', cursor: 'pointer', fontSize: 11 }}>Fetch from /v1/models</button>
+                           <div style={{ fontSize: 10, color: 'var(--text-4)' }}>Fetch available models from the provider</div>
+                         </div>
+                       </div>
                       <div style={{ display: 'flex', gap: 6 }}>
                         <button
                           onClick={() => {
                             const modelList = newModelInput.split(/[\n,]/).map(m => m.trim()).filter(Boolean);
-                            saveCustomProvider({ ...newProvider, models: modelList });
+                            const envObj: Record<string, string> = {};
+                            newEnvInput.split('\n').forEach(line => {
+                              const [key, ...vals] = line.split('=');
+                              if (key && vals.length) envObj[key.trim()] = vals.join('=').trim();
+                            });
+                            saveCustomProvider({ ...newProvider, models: modelList, environment: envObj });
                           }}
                           disabled={!newProvider.name.trim() || !newProvider.baseUrl?.trim()}
                           style={{ padding: '5px 10px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}>Save</button>
-                        <button onClick={() => { setShowAddProvider(false); setNewProvider({ name: '', displayName: '', npm: '@ai-sdk/openai-compatible', baseUrl: '', apiKey: '', models: [] }); setNewModelInput(''); }}
+                        <button onClick={() => { setShowAddProvider(false); setNewProvider({ name: '', displayName: '', npm: '@ai-sdk/openai-compatible', baseUrl: '', apiKey: '', models: [], environment: {} }); setNewModelInput(''); setNewEnvInput(''); }}
                           style={{ padding: '5px 10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
                       </div>
                     </div>
@@ -347,14 +389,19 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
                             <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{p.name}</span>
                             <button onClick={() => deleteCustomProvider(p.name)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Remove</button>
                           </div>
-                          {p.baseUrl && <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 2 }}>{p.baseUrl}</div>}
-                          {p.models && p.models.length > 0 && (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                              {p.models.map(m => (
-                                <span key={m} style={{ fontSize: 10, padding: '1px 6px', background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 3, color: 'var(--text-3)' }}>{m}</span>
-                              ))}
-                            </div>
-                          )}
+                           {p.baseUrl && <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 2 }}>{p.baseUrl}</div>}
+                           {p.environment && Object.keys(p.environment).length > 0 && (
+                             <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 2 }}>
+                               Env: {Object.entries(p.environment).map(([k, v]) => `${k}=${v}`).join(', ')}
+                             </div>
+                           )}
+                           {p.models && p.models.length > 0 && (
+                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                               {p.models.map(m => (
+                                 <span key={m} style={{ fontSize: 10, padding: '1px 6px', background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 3, color: 'var(--text-3)' }}>{m}</span>
+                               ))}
+                             </div>
+                           )}
                         </div>
                       ))}
                     </div>
