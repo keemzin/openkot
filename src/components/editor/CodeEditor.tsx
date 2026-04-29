@@ -136,8 +136,8 @@ export const CodeEditor = forwardRef<CodeEditorRef, Props>(({ value, onChange, o
         ]),
         getLanguage(fileName),
         EditorView.updateListener.of((update) => {
-          if (update.docChanged && viewRef.current) {
-            onChange(viewRef.current.state.doc.toString());
+          if (update.docChanged) {
+            onChange(update.doc.toString());
           }
         }),
         EditorView.theme({
