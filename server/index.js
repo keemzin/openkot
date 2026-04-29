@@ -669,11 +669,15 @@ async function start() {
 
   app.post('/api/fs/write', jsonBody, async (req, res) => {
     try {
-      const { path: targetPath, content = '' } = req.body;
-      if (!targetPath) return res.status(400).json({ error: 'path required' });
-      await fs.promises.writeFile(targetPath, content, 'utf8');
+      const { path: rawPath, content = '' } = req.body;
+      if (!rawPath) return res.status(400).json({ error: 'path required' });
+      const targetPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(WORKING_DIR, rawPath);
+      console.log('[fs/write] writing to:', targetPath);
+      fs.writeFileSync(targetPath, content, 'utf8');
+      console.log('[fs/write] written successfully');
       res.json({ success: true, path: targetPath.replace(/\\/g, '/') });
     } catch (err) {
+      console.log('[fs/write] error:', err.message);
       res.status(500).json({ error: err.message });
     }
   });

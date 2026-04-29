@@ -2,7 +2,7 @@
 import { marked } from 'marked';
 import { TokenUsageIndicator } from './components/ui/TokenUsageIndicator';
 import { FileViewer } from './components/filetree/FileViewer';
-import { uid, getContextUsage, fallbackCopy, getGhostty, processAnsi } from './utils/helpers';
+import { uid, getContextUsage, fallbackCopy } from './utils/helpers';
 import { gitStatusColor, gitStatusLabel } from './utils/gitUtils';
 import type { GitFileStatus, GitStatus } from './utils/gitUtils';
 import { fileColor, getFileExt } from './utils/fileUtils';

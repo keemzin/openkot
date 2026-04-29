@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Terminal } from '@xterm/xterm';
-import { FitAddon } from '@xterm/addon-fit';
-import '@xterm/xterm/css/xterm.css';
+import { Ghostty, Terminal, FitAddon } from 'ghostty-web';
 import { getTerminalSessionForDir, setTerminalSessionForDir, stopTerminalForDir } from '../../utils/helpers';
 
 export function DesktopTerminal({ workingDir }: { workingDir: string }) {
@@ -124,12 +122,15 @@ export function DesktopTerminal({ workingDir }: { workingDir: string }) {
 
         termSessionIdRef.current = termId;
 
+        const ghostty = await Ghostty.load();
+
         const terminal = new Terminal({
           cursorBlink: true,
           fontSize: 13,
           fontFamily: '"IBM Plex Mono","JetBrainsMonoNL Nerd Font","FiraCode Nerd Font","JetBrains Mono","Fira Code",monospace',
           scrollback: 10_000,
           theme: getTheme(),
+          ghostty,
         });
         const fitAddon = new FitAddon();
         terminal.loadAddon(fitAddon);

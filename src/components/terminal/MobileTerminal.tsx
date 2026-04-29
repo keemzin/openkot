@@ -1,19 +1,39 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { processAnsi, getTerminalSessionForDir, setTerminalSessionForDir, stopTerminalForDir } from '../../utils/helpers';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
+import { getTerminalSessionForDir, setTerminalSessionForDir, stopTerminalForDir } from '../../utils/helpers';
+
+const getTheme = () => {
+  const s = getComputedStyle(document.documentElement);
+  const v = (k: string, fb: string) => s.getPropertyValue(k).trim() || fb;
+  return {
+    background: v('--bg','#1a1a1a'), foreground: v('--text-2','#e0e0e0'),
+    cursor: v('--accent','#7c6af7'), cursorAccent: v('--bg','#1a1a1a'),
+    selectionBackground: v('--accent','#7c6af7'),
+    black: v('--text-5','#444'), red: v('--red','#f87171'),
+    green: v('--green','#4ade80'), yellow: v('--yellow','#facc15'),
+    blue: v('--blue','#60a5fa'), magenta: v('--accent','#7c6af7'),
+    cyan: '#22d3ee', white: v('--text-2','#e0e0e0'),
+    brightBlack: v('--text-4','#666'), brightRed: v('--red','#f87171'),
+    brightGreen: v('--green','#4ade80'), brightYellow: v('--yellow','#facc15'),
+    brightBlue: v('--blue','#60a5fa'), brightMagenta: v('--accent','#7c6af7'),
+    brightCyan: '#67e8f9', brightWhite: '#ffffff',
+  };
+};
 
 export function MobileTerminal({ workingDir }: { workingDir: string }) {
-  const outputRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<Terminal | null>(null);
+  const fitAddonRef = useRef<FitAddon | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const termSessionIdRef = useRef<string | null>(null);
-  const [rows, setRows] = useState<string[]>(['']);
   const [connected, setConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [fontSize, setFontSize] = useState(13);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const isComposingRef = useRef(false);
+  const [fontSize, setFontSize] = useState(13);
 
-  // Track visual viewport height to detect keyboard
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
@@ -27,35 +47,22 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
     return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); };
   }, []);
 
-  useEffect(() => {
-    if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight;
-  }, [rows]);
+  const sendInput = useCallback((data: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(data);
+  }, []);
 
-  const appendOutput = useCallback((raw: string) => {
-    const cleaned = processAnsi(raw);
-    setRows(prev => {
-      const next = [...prev];
-      let cur = next[next.length - 1] ?? '';
-      let i = 0;
-      while (i < cleaned.length) {
-        const ch = cleaned[i];
-        if (ch === '\r' && cleaned[i + 1] === '\n') {
-          next[next.length - 1] = cur; next.push(''); cur = ''; i += 2;
-        } else if (ch === '\n') {
-          next[next.length - 1] = cur; next.push(''); cur = ''; i++;
-        } else if (ch === '\r') {
-          cur = ''; i++;
-        } else if (ch === '\x08') {
-          if (cur.length > 0) cur = cur.slice(0, -1); i++;
-        } else if (ch === '\x1b' && cleaned[i + 1] === '[' && cleaned[i + 2] === 'K') {
-          cur = ''; i += 3;
-        } else {
-          cur += ch; i++;
-        }
-      }
-      next[next.length - 1] = cur;
-      return next.length > 2000 ? next.slice(-2000) : next;
-    });
+  // Pinch-to-zoom for terminal font size
+  useEffect(() => {
+    const el = containerRef.current; if (!el) return;
+    let lastDist = 0, pinching = false;
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+    const onTS = (e: TouchEvent) => { if (e.touches.length === 2) { pinching = true; lastDist = dist(e.touches); } else pinching = false; };
+    const onTM = (e: TouchEvent) => { if (!pinching || e.touches.length !== 2) return; e.preventDefault(); const d = dist(e.touches); const delta = d - lastDist; lastDist = d; if (Math.abs(delta) > 1) setFontSize(p => Math.min(24, Math.max(9, p + delta * 0.04))); };
+    const onTE = () => { pinching = false; };
+    el.addEventListener('touchstart', onTS, { passive: true });
+    el.addEventListener('touchmove', onTM, { passive: false });
+    el.addEventListener('touchend', onTE);
+    return () => { el.removeEventListener('touchstart', onTS); el.removeEventListener('touchmove', onTM); el.removeEventListener('touchend', onTE); };
   }, []);
 
   useEffect(() => {
@@ -88,7 +95,7 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
           socket!.send(frame);
         };
         socket.onopen = () => { if (!disposed) sendBind(); };
-        socket.onclose = () => { if (!disposed) { setConnected(false); wsRef.current = null; appendOutput('\n[Disconnected]\n'); } };
+        socket.onclose = () => { if (!disposed) { setConnected(false); wsRef.current = null; terminalRef.current?.write('\r\n[Disconnected]\r\n'); } };
         socket.onerror = () => { if (!disposed) setError('Connection failed'); };
         socket.onmessage = (e) => {
           if (disposed) return;
@@ -97,13 +104,13 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
             if (bytes[0] === 0x01) {
               try {
                 const ctrl = JSON.parse(new TextDecoder().decode(bytes.subarray(1)));
-                if (ctrl.t === 'bok') { setConnected(true); setError(null); inputRef.current?.focus(); }
-                if (ctrl.t === 'x') appendOutput('\r\n[Process exited]\r\n');
+                if (ctrl.t === 'bok') { setConnected(true); setError(null); }
+                if (ctrl.t === 'x') terminalRef.current?.write('\r\n[Process exited]\r\n');
               } catch {}
             }
             return;
           }
-          if (typeof e.data === 'string') appendOutput(e.data);
+          if (typeof e.data === 'string') terminalRef.current?.write(e.data);
         };
       } catch (e) { if (!disposed) setError(e instanceof Error ? e.message : 'Failed'); }
     };
@@ -114,122 +121,46 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
       wsRef.current = null;
       termSessionIdRef.current = null;
     };
-  }, [workingDir, appendOutput]);
+  }, [workingDir]);
 
-  // Pinch-to-zoom
   useEffect(() => {
-    const el = outputRef.current; if (!el) return;
-    let lastDist = 0, pinching = false;
-    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
-    const onTS = (e: TouchEvent) => { if (e.touches.length === 2) { pinching = true; lastDist = dist(e.touches); } else pinching = false; };
-    const onTM = (e: TouchEvent) => { if (!pinching || e.touches.length !== 2) return; e.preventDefault(); const d = dist(e.touches); const delta = d - lastDist; lastDist = d; if (Math.abs(delta) > 1) setFontSize(p => Math.min(24, Math.max(9, p + delta * 0.04))); };
-    const onTE = () => { pinching = false; };
-    el.addEventListener('touchstart', onTS, { passive: true });
-    el.addEventListener('touchmove', onTM, { passive: false });
-    el.addEventListener('touchend', onTE);
-    return () => { el.removeEventListener('touchstart', onTS); el.removeEventListener('touchmove', onTM); el.removeEventListener('touchend', onTE); };
-  }, []);
+    const container = containerRef.current;
+    if (!container) return;
+    const terminal = new Terminal({
+      cursorBlink: true,
+      fontSize,
+      fontFamily: '"IBM Plex Mono", monospace',
+      scrollback: 10_000,
+      theme: getTheme(),
+    });
+    const fitAddon = new FitAddon();
+    terminal.loadAddon(fitAddon);
+    terminal.open(container);
+    terminalRef.current = terminal;
+    fitAddonRef.current = fitAddon;
 
-  const sendInput = useCallback((data: string) => {
-    if (wsRef.current?.readyState === WebSocket.OPEN) wsRef.current.send(data);
-  }, []);
-
-  const lastSentValueRef = useRef('');
-
-  // ── Input handling ──────────────────────────────────────────────────────
-  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    e.stopPropagation();
-    if (isComposingRef.current) return;
-    if ((e.nativeEvent as KeyboardEvent).isComposing) return;
-
-    // Ctrl combos
-    if (e.ctrlKey && !e.metaKey && e.key.length === 1) {
-      const ctrlMap: Record<string, string> = {
-        c: '\x03', d: '\x04', l: '\x0c', a: '\x01', e: '\x05',
-        k: '\x0b', u: '\x15', w: '\x17', r: '\x12', z: '\x1a',
-      };
-      if (ctrlMap[e.key.toLowerCase()]) {
-        e.preventDefault();
-        sendInput(ctrlMap[e.key.toLowerCase()]);
-        return;
-      }
-    }
-
-    // Special keys
-    const specialMap: Record<string, string> = {
-      Enter: '\r',
-      Backspace: '\x7f',
-      Delete: '\x1b[3~',
-      Tab: '\t',
-      Escape: '\x1b',
-      ArrowUp: '\x1b[A', ArrowDown: '\x1b[B',
-      ArrowLeft: '\x1b[D', ArrowRight: '\x1b[C',
-      Home: '\x1b[H', End: '\x1b[F',
-      PageUp: '\x1b[5~', PageDown: '\x1b[6~',
+    try { fitAddon.fit(); } catch {}
+    return () => {
+      terminal.dispose();
+      terminalRef.current = null;
+      fitAddonRef.current = null;
     };
-    if (specialMap[e.key]) {
-      e.preventDefault();
-      // Reset tracking so input event doesn't double-fire
-      e.currentTarget.value = '';
-      lastSentValueRef.current = '';
-      sendInput(specialMap[e.key]);
-      return;
-    }
-    // Printable chars: handled by input event only
   }, [sendInput]);
 
-  const handleInput = useCallback((e: React.FormEvent<HTMLTextAreaElement>) => {
-    if (isComposingRef.current) return;
-    const target = e.currentTarget;
-    const val = target.value;
-    if (!val) { lastSentValueRef.current = ''; return; }
-
-    // Only send the NEW characters since last time.
-    // lastSentValueRef holds the full textarea value we already processed.
-    const prev = lastSentValueRef.current;
-    let toSend: string;
-    if (val === prev) {
-      // iOS restored the exact same value — nothing new to send
-      return;
-    } else if (val.startsWith(prev)) {
-      // Normal accumulation — only send the new suffix
-      toSend = val.slice(prev.length);
-    } else {
-      // Autocorrect / replacement — send the whole new value
-      toSend = val;
+  // Update font size
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.options.fontSize = fontSize;
+      fitAddonRef.current?.fit();
     }
-
-    if (toSend) {
-      sendInput(toSend.replace(/\r\n|\r|\n/g, '\r'));
-    }
-
-    // Update tracking to the full current value.
-    // If iOS restores the textarea value without firing input, next input event
-    // will see val === lastSentValueRef and send nothing (correct).
-    lastSentValueRef.current = val;
-    // Attempt to clear — if it sticks, next input starts fresh
-    target.value = '';
-    // Don't reset lastSentValueRef here — keep it as `val` so delta works if iOS restores
-  }, [sendInput]);
-
-  const handleCompositionStart = useCallback(() => {
-    isComposingRef.current = true;
-  }, []);
-
-  const handleCompositionEnd = useCallback((e: React.CompositionEvent<HTMLTextAreaElement>) => {
-    isComposingRef.current = false;
-    const target = e.currentTarget;
-    const data = e.data || target.value;
-    if (data) sendInput(data.replace(/\r\n|\r|\n/g, '\r'));
-    target.value = '';
-  }, [sendInput]);
+  }, [fontSize]);
 
   const handleStopTerminal = useCallback(async () => {
     await stopTerminalForDir(workingDir);
     setConnected(false);
     setError(null);
     termSessionIdRef.current = null;
-    setRows(['']);
+    terminalRef.current?.reset();
   }, [workingDir]);
 
   const mobileKeys = [
@@ -244,10 +175,8 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
   const QUICKKEYS_H = 44;
 
   return (
-    // Outer: full height, flex column, no bottom padding here
-    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', background: 'var(--bg)', border: '1px solid var(--border-2)', borderRadius: '8px', overflow: 'hidden' }}>
-
-      {/* Hidden textarea — invisible, positioned off-screen, captures keyboard */}
+    <div style={{ height: '100%', display: 'flex', justifyContent: 'center', alignItems: 'stretch', background: 'var(--bg)', padding: '16px' }}>
+      <div style={{ maxWidth: '800px', width: '100%', display: 'flex', flexDirection: 'column', border: '1px solid var(--border-2)', borderRadius: '8px', overflow: 'hidden' }}>
       <textarea
         ref={inputRef}
         tabIndex={-1}
@@ -256,53 +185,53 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
         spellCheck={false}
         data-terminal-hidden-input="true"
         disabled={!connected}
-        onKeyDown={handleKeyDown}
-        onInput={handleInput}
-        onCompositionStart={handleCompositionStart}
-        onCompositionEnd={handleCompositionEnd}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            sendInput('\r');
+            e.currentTarget.value = '';
+            return;
+          }
+          if (e.key === 'Backspace') {
+            e.preventDefault();
+            sendInput('\x7f');
+            return;
+          }
+          if (e.key.length === 1) {
+            e.preventDefault();
+            sendInput(e.key);
+          }
+        }}
+        onInput={(e) => {
+          const val = e.currentTarget.value;
+          if (val) {
+            sendInput(val.replace(/\r\n|\r|\n/g, '\r'));
+            e.currentTarget.value = '';
+          }
+        }}
         style={{
           position: 'fixed', left: '-9999px', top: '-9999px',
           width: 1, height: 1, opacity: 0,
-          fontSize: 16, // prevent iOS zoom
+          fontSize: 16,
           border: 'none', outline: 'none', resize: 'none',
           background: 'transparent', color: 'transparent',
           caretColor: 'transparent', padding: 0, margin: 0,
         }}
       />
-
-      {/* Status bar */}
       <div style={{ padding: '4px 12px', borderBottom: '1px solid var(--border)', fontSize: 11, color: 'var(--text-4)', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
         <span style={{ width: 6, height: 6, borderRadius: '50%', background: connected ? 'var(--green)' : error ? 'var(--red)' : 'var(--text-5)' }} />
         <span>{connected ? 'Terminal' : error ?? 'Connecting…'}</span>
       </div>
-
-      {/* Output — shrinks to leave room for quick keys + keyboard */}
       <div
-        ref={outputRef}
+        ref={containerRef}
         onClick={() => inputRef.current?.focus()}
         style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '8px 10px',
-          // leave space for quick keys bar + keyboard
-          paddingBottom: `${QUICKKEYS_H + keyboardHeight + 8}px`,
-          fontFamily: '"IBM Plex Mono", monospace',
-          fontSize,
-          lineHeight: 1.5,
-          color: 'var(--text-2)',
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-all',
-          WebkitOverflowScrolling: 'touch',
-          touchAction: 'pan-y',
+          height: `calc(100% - ${QUICKKEYS_H + keyboardHeight + 8}px)`,
+          minWidth: 0,
           cursor: 'text',
-        } as React.CSSProperties}
-      >
-        {rows.map((line, i) => (
-          <div key={i}>{line || '\u00a0'}</div>
-        ))}
-      </div>
-
-      {/* Quick keys — fixed above keyboard */}
+        }}
+      />
       {connected && (
         <div style={{
           position: 'fixed',
@@ -321,8 +250,8 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
               key={key.label}
               onPointerDown={(e) => {
                 e.preventDefault();
-                if ('action' in key) key.action!();
-                else sendInput(key.seq!);
+                if ('action' in key) key.action();
+                else sendInput(key.seq);
                 inputRef.current?.focus();
               }}
               style={{
@@ -343,6 +272,7 @@ export function MobileTerminal({ workingDir }: { workingDir: string }) {
           ))}
         </div>
       )}
+      </div>
     </div>
   );
 }
