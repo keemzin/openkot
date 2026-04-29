@@ -28,7 +28,7 @@ function Terminal({ workingDir }: { workingDir: string }) {
     : <DesktopTerminal workingDir={workingDir} />;
 }
 
-// â”€â”€ Theme System â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Theme System â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import { applyTheme, loadTheme, THEMES, THEME_DEFS, LS_THEME, THEME_COMPAT, type ThemeId, type ThemeDef } from './constants/themes';
 import { AgentSelector } from './components/app/AgentSelector';
@@ -41,8 +41,7 @@ const getWorkingDir = () => _workingDir;
 // Configure marked
 marked.setOptions({ breaks: true, gfm: true } as any);
 
-// â”€â”€ Global file-open event (chat â†’ tree) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+//Global file-open event (chat tree)
 type FileOpenListener = (path: string) => void;
 const fileOpenListeners = new Set<FileOpenListener>();
 const emitOpenFile = (path: string) => fileOpenListeners.forEach(fn => fn(path));
@@ -51,16 +50,16 @@ const onOpenFile = (fn: FileOpenListener) => {
   return () => { fileOpenListeners.delete(fn); };
 };
 
-// â”€â”€ Prism theme (matches openchamber dark palette) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Prism theme (matches openchamber dark palette)
 
 const PRISM_CSS = ``;
 
 
 import { RightPanel, RIGHT_PANEL_MIN, RIGHT_PANEL_MAX, RIGHT_PANEL_DEFAULT, LS_PANEL_WIDTH, getRightPanelDefault } from './components/ui/RightPanel';
 
-// â”€â”€ File Tree â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// File Tree
 
-// â”€â”€ Git status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Git status
 
 
 function FileTreePanel({ workingDir }: { workingDir: string }) {
@@ -412,8 +411,7 @@ function FileTreePanel({ workingDir }: { workingDir: string }) {
   );
 }
 
-// â”€â”€ MCP Form â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
+//MCP Form
 
 // ─── Session Item ──────────────────────────────────────────────────────────────────────────────
 
@@ -552,10 +550,7 @@ function SessionItem({
   );
 }
 
-// â”€â”€ Plan Mode â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-const PLAN_FILENAME = 'PLAN.md';
-
+// Plan Mode
 // Detect plan file path from tool parts” watches for write/edit to PLAN.md
 function extractPlanPathFromParts(parts: Part[]): string | null {
   for (const part of parts) {
@@ -649,7 +644,7 @@ function PlanView({ planPath, workingDir }: { planPath: string; workingDir: stri
   );
 }
 
-// â”€â”€ Right Panel Content (Git + Files tabs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+//Right Panel Content (Git + Files tabs)
 
 function RightPanelContent({ workingDir }: { workingDir: string }) {
   const [tab, setTab] = useState<'files' | 'git'>('files');
@@ -687,11 +682,11 @@ function RightPanelContent({ workingDir }: { workingDir: string }) {
   );
 }
 
-// â”€â”€ App â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// App
 
 const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 
-// â”€â”€ Permission Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Permission Card
 
 function PermissionCard({ permission, onReply }: {
   permission: PermissionRequest;
@@ -772,7 +767,7 @@ function PermissionCard({ permission, onReply }: {
   );
 }
 
-// â”€â”€ Question Card â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Question Card
 
 function QuestionCard({ question, onReply, onReject }: {
   question: QuestionRequest;
