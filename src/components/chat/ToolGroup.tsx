@@ -196,6 +196,7 @@ export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming }: {
   const [view, setView] = useState<'full' | 'justify' | 'hidden'>(
     isStreaming ? 'full' : (hasJustifications ? 'justify' : 'hidden')
   );
+  const [showAllJustifications, setShowAllJustifications] = useState(false);
 
   // Switch to full while streaming, stay there until user manually changes
   const prevStreaming = React.useRef(isStreaming);
@@ -253,13 +254,35 @@ export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming }: {
         </div>
       )}
 
-      {view === 'justify' && hasJustifications && (
-        <div style={{ paddingLeft: 8, borderLeft: '2px solid var(--bg-4)', display: 'flex', flexDirection: 'column', gap: 1 }}>
-          {justificationParts.map(p =>
-            <JustificationRow key={p.id} text={p.text ?? ''} />
-          )}
-        </div>
-      )}
+      {view === 'justify' && hasJustifications && (() => {
+        const COLLAPSE_THRESHOLD = 3;
+        const shouldCollapse = justificationParts.length > COLLAPSE_THRESHOLD;
+        const visibleParts = shouldCollapse && !showAllJustifications
+          ? justificationParts.slice(-COLLAPSE_THRESHOLD)
+          : justificationParts;
+        const hiddenCount = justificationParts.length - COLLAPSE_THRESHOLD;
+
+        return (
+          <div style={{ paddingLeft: 8, borderLeft: '2px solid var(--bg-4)', display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {shouldCollapse && !showAllJustifications && (
+              <button
+                onClick={() => setShowAllJustifications(true)}
+                style={{
+                  background: 'transparent', border: 'none', cursor: 'pointer',
+                  padding: '4px 0', display: 'flex', alignItems: 'center', gap: 6,
+                  fontSize: '0.8rem', color: 'var(--tools-description)', fontFamily: 'inherit',
+                }}
+              >
+                <span style={{ width: 5, height: 5, borderRadius: '50%', flexShrink: 0, background: 'var(--tools-description)', opacity: 0.5 }} />
+                <span>▼ {hiddenCount} earlier steps</span>
+              </button>
+            )}
+            {visibleParts.map(p =>
+              <JustificationRow key={p.id} text={p.text ?? ''} />
+            )}
+          </div>
+        );
+      })()}
     </div>
   );
 });
