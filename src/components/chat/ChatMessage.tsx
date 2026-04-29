@@ -4,9 +4,10 @@ import { fallbackCopy } from '../../utils/helpers';
 import { Markdown } from './Markdown';
 import { ToolGroup } from './ToolGroup';
 
-export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStreaming, onFork, hideTools }: {
+export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStreaming, onFork, onRevert, hideTools }: {
   msg: Message; parts?: Part[]; isStreaming?: boolean;
   onFork?: (messageId: string) => void;
+  onRevert?: (messageId: string) => void;
   hideTools?: boolean;
 }) {
   const isUser = msg.role === 'user';
@@ -96,7 +97,19 @@ export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStrea
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
         </button>
       )}
-      {msg.role === 'assistant' && !isStreaming && msg.tokens && (
+      {onRevert && !msg.id.startsWith('temp_') && (
+        <button onClick={() => onRevert(msg.id)} title="Revert to this message (undo all changes after)" style={{
+          width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 4,
+          color: 'var(--border-2)', transition: 'color 0.1s',
+        }}
+          onMouseEnter={e => (e.currentTarget.style.color = 'var(--red, #e06c75)')}
+          onMouseLeave={e => (e.currentTarget.style.color = 'var(--border-2)')}
+        >
+          {/* undo/revert arrow */}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M3 13C5.33 7.67 10.67 4 17 4a9 9 0 0 1 0 18H3"/></svg>
+        </button>
+      )}      {msg.role === 'assistant' && !isStreaming && msg.tokens && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {msg.tokens.input != null && (
             <span style={{ fontSize: 10, color: 'var(--text-5)' }}>↑ {msg.tokens.input.toLocaleString()} in</span>

@@ -1471,6 +1471,43 @@ function App() {
     } catch { /* ignore */ }
   }, [loadSessions, loadSessionMessages]);
 
+  const revertSession = useCallback(async (messageId: string) => {
+    const sid = sessionIdRef.current;
+    if (!sid) return;
+    const dir = getWorkingDir();
+    // Optimistically remove messages at and after the revert point
+    setMessages(prev => {
+      const idx = prev.findIndex(m => m.id === messageId);
+      return idx >= 0 ? prev.slice(0, idx) : prev;
+    });
+    setPartsMap(prev => {
+      const next = { ...prev };
+      // We don't know which keys to remove without the old messages list,
+      // so we'll let the reload clean it up
+      return next;
+    });
+    try {
+      const r = await fetch(
+        `/api/session/${encodeURIComponent(sid)}/revert?directory=${encodeURIComponent(dir)}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messageID: messageId }),
+        }
+      );
+      if (!r.ok) {
+        // Rollback — reload authoritative state
+        await loadSessionMessages(sid);
+        return;
+      }
+    } catch {
+      await loadSessionMessages(sid);
+      return;
+    }
+    // Reload to get authoritative state from server
+    await loadSessionMessages(sid);
+  }, [loadSessionMessages]);
+
   const listenToSession = useCallback((sid: string, tempAssistantId: string, isOngoing: boolean = false) => {
     if (eventSourceRef.current) eventSourceRef.current.close();
     const dir = getWorkingDir();
@@ -2427,7 +2464,8 @@ function App() {
             return turns.map((turn, ti) => {
               if (turn.msgs[0].role === 'user') {
                 const msg = turn.msgs[0];
-                return <ChatMessage key={msg.id} msg={msg} parts={partsMap[msg.id]} isStreaming={msg.id === streamingMsgId} onFork={forkSession} />;
+                const isLastTurn = ti === turns.length - 1;
+                return <ChatMessage key={msg.id} msg={msg} parts={partsMap[msg.id]} isStreaming={msg.id === streamingMsgId} onFork={forkSession} onRevert={!isLastTurn ? revertSession : undefined} />;
               }
               // Assistant turn — ONE Trail for all tool activity, ONE final text response
               // Collect all trail parts (tools + interleaved justification text) across all messages
