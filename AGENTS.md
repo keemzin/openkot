@@ -1,6 +1,6 @@
 # Agent Guidelines for OpenKot
 
-## Project Overview
+## Project Overview.
 
 This project uses **Bun** (not NPM) as its primary runtime and package manager.
 
