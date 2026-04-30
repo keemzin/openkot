@@ -208,24 +208,9 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
           continue;
         }
 
-        if (server.enabled) {
-          try {
-            const health = await fetch('/health').then(r => r.json());
-            if (!health.isOpenCodeReady) continue;
-            const { name, enabled, ...config } = server;
-            if (!config.type) config.type = 'local';
-            const response = await fetch('/api/mcp', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: server.name, config }),
-            });
-            if (response.ok) {
-              console.log('Registered MCP with OpenCode:', server.name);
-            }
-          } catch (e) {
-            console.error('Failed to register MCP with OpenCode', server.name, e);
-          }
-        }
+        // With MCP lazy loading, servers are registered but not started here
+        // They will start on-demand when tools are first used
+        console.log('MCP config saved:', server.name, server.enabled ? 'enabled' : 'disabled');
       } catch (e) {
         console.error('Failed to save MCP', server.name, e);
       }

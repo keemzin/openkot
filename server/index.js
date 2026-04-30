@@ -134,7 +134,7 @@ async function startOpenCode(cwd) {
       const textDecoder = new TextDecoder();
 
       const checkReady = (output) => {
-        if (output.includes('opencode server listening')) {
+        if (output.includes('opencode server listening') || output.includes('kilo server listening') || output.includes('listening')) {
           clearTimeout(timer);
           isOpenCodeReady = true;
           resolve(output);

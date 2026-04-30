@@ -1,4 +1,4 @@
-# Agent Guidelines for OpenCode GUI
+# Agent Guidelines for OpenKot
 
 ## Project Overview
 
@@ -7,111 +7,37 @@ This project uses **Bun** (not NPM) as its primary runtime and package manager.
 This is a **web-based UI for OpenCode** — a chat interface that proxies requests to the OpenCode CLI binary. The architecture combines a React-based frontend with an Express proxy server:
 
 ```
-React Frontend (src/main.tsx) 
-    ↓ HTTP/WebSocket
+React Frontend (src/main.tsx)
+     ↓ HTTP/WebSocket
 Express Server (server/index.js)
-    ↓ Proxy /api/* → OpenCode CLI (port 3356 or 4088)
-    ↓ Direct handlers for /api/fs/*, /api/git/*, /api/terminal/*, /api/question/*
+     ↓ Proxy /api/* → OpenCode CLI (port 3358)
+     ↓ Direct handlers for /api/fs/*, /api/git/*, /api/terminal/*, /api/question/*
 OpenCode Binary (vendor/opencode/opencode.exe)
 ```
 
 ## Key Architecture Principles
 
-1. **Component-based architecture**: While `src/App.tsx` remains the main orchestrator (~2,600 lines), most UI components have been refactored into `src/components/` (chat, git, filetree, terminal, ui).
+1. **Component-based architecture**: `src/App.tsx` (~2,600 lines) remains the main orchestrator; UI components are in `src/components/` (chat, git, filetree, terminal, ui, app).
 2. **Local state management**: UI state (theme, sidebar, models, agents, sessions) uses React local state with useState hooks. No external state library is used.
 3. **Proxy pattern**: Server proxies most `/api/*` requests to OpenCode, handles filesystem/git/terminal/question directly.
 4. **OpenCode compatibility**: Uses the same API contracts as the OpenCode CLI.
 5. **Bun runtime**: Uses Bun for package management and server runtime (`bun run server`).
 
-
-- **API Discovery**: OpenCode endpoint is `/question/:requestID/reply` (with requestID as URL param).
-
 ### File Reading Limitations
-- **`.env` files cannot be read while server is running** - Windows file locking prevents reading config files that are in use.
+- **`.env` files cannot be read while server is running** — Windows file locking prevents reading config files that are in use.
 - **Workaround**: Use the file tree panel to view `.env` files, or stop the server temporarily.
-
-## Recent Features Added
-
-### Autopilot Auto-Approve Fix (2026-04-27)
-- When **Autopilot is ON**, `permission.asked` SSE events are now auto-replied with `"always"` immediately — no card shown.
-- Uses `autopilotRef` (a `useRef`) so the SSE closure always reads the current autopilot state, not a stale one.
-- When **Autopilot is OFF**, the `PermissionCard` is shown as before.
-
-### Permission Card `{}` Fix (2026-04-27)
-- `PermissionCard.renderContent()` now handles `read` tool type (shows file path).
-- Empty metadata (`{}`) now renders `null` instead of the literal string `{}`.
-
-### QuestionCard Mojibake Fix (2026-04-27)
-- Broken UTF-8 double-encoded emoji (`âš `, `âœï¸`, `â†'`, `âœ"`) replaced with plain text.
-- Emoji font fallback added to `body` font-family: `'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji'`.
-
-### Browser Tab Title (2026-04-27)
-- `index.html` title changed from `OpenCode` to `OpenKot`.
-
-### MCP Config Write Fix (2026-04-27)
-- `writeConfig` now uses `fs.promises.writeFile` (async) instead of `fs.writeFileSync` to avoid a Bun Windows bug (`WriteFailed` panic).
-- All MCP endpoints (POST, PATCH, DELETE) are now `async` and `await` the write.
-- JSONC parsing simplified to plain `JSON.parse` (no comment stripping needed since the UI writes clean JSON).
-
-### CLI `openkot` stdio Fix (2026-04-27)
-- **Root cause of Bun crash**: `cli/index.ts` was spawning the server with `stdio: ["ignore", "pipe", "pipe"]`. Piping stdout through the CLI process caused Bun to panic with `WriteFailed` when the server tried to write the config file.
-- **Fix**: Changed to `stdio: ["ignore", "inherit", "inherit"]` — server writes directly to terminal.
-- **Ready detection**: Replaced stdout-watching with health endpoint polling (`GET /health`).
-
-### Skills & Sub-agents Support (2026-04-22)
-- Added `.opencode/NOT_skills` for specialized toolsets (e.g., `crawl4ai`).
-- Sub-agents like `explore` use the `task` tool to delegate complex investigations.
-- Sub-sessions with `parentID` are automatically grouped under their parent session in the sidebar.
-
-### Permission System & Autopilot (2026-04-23)
-- Added **Autopilot/Permission toggle** in the chat toolbar.
-- **Autopilot ON**: AI executes tools automatically.
-- **Permission mode (Autopilot OFF)**: AI asks for user approval before executing sensitive tools (bash, write, edit, etc.).
-- Handled via `permission.asked` SSE events and `PermissionCard` component.
-- Responses sent to `/api/permission/reply` (once, always, reject).
-
-### CodeMirror 6 Editor Upgrade (2026-04-23)
-- Replaced standard `<textarea>` with **CodeMirror 6** for file editing.
-- Features: Syntax highlighting, line numbers, bracket matching, and `Mod-S` (Ctrl+S) save support.
-- Custom dark theme integrated with existing CSS variables.
-- Component located at `src/components/editor/CodeEditor.tsx`.
-
-### xterm.js Terminal & Directory-Bound Sessions (2026-04-24)
-- Integrated **xterm.js terminal** for desktop with WebGL/canvas rendering.
-- Mobile devices use a text-based fallback terminal with hidden textarea for keyboard input.
-- **Directory-bound terminals** - one persistent terminal session per working directory with global session management.
-- **Global terminal access** - available whenever working directory is set, independent of chat sessions.
-- **Manual stop controls** - desktop ❌ button and mobile "Stop" button to terminate terminal sessions.
-- **Automatic cleanup** - unused terminal sessions removed after 5 minutes of inactivity.
-- Terminal uses WebSocket protocol at `/api/terminal/ws`.
-
-### Git Panel & UI Improvements (2026-04-21)
-- Redesigned Git changes list with status badges and file icons.
-- Per-session model selection memory (persisted to localStorage).
-- Directory picker shows relative paths for better identification.
-
-### Image Preview & Path Support (2026-04-20)
-- File viewer supports PNG, JPG, GIF, SVG, WEBP, BMP, ICO.
-- `WORKING_DIR` supports relative paths (defaults to `WORKSPACE`).
 
 ## Directory Structure
 
 ```
 ├── src/
-│   ├── App.tsx              # Main orchestrator (~1,200 lines, uses local state)
-│   ├── stores/              # Minimal state management (preferences only)
+│   ├── App.tsx              # Main orchestrator (~2,600 lines)
+│   ├── stores/
 │   │   └── preferencesStore.ts # Font preferences (used by FontPicker)
 │   ├── constants/         # Static constants (themes.ts)
-│   ├── styles/          # CSS files (prism.css)
+│   ├── styles/            # CSS files (prism.css)
 │   ├── components/
-│   │   ├── app/          # App-level components
-│   │   │   ├── AgentSelector.tsx
-│   │   │   ├── DirPicker.tsx
-│   │   │   ├── FontPicker.tsx
-│   │   │   ├── McpForm.tsx
-│   │   │   ├── PermissionCard.tsx
-│   │   │   ├── QuestionCard.tsx
-│   │   │   └── SettingsDialog.tsx
+│   │   ├── app/          # App-level components (AgentSelector, DirPicker, FontPicker, McpForm, PermissionCard, QuestionCard, SettingsDialog)
 │   │   ├── chat/         # Chat components
 │   │   ├── git/          # Git components
 │   │   ├── filetree/     # File tree components
@@ -204,53 +130,6 @@ OpenCode Binary (vendor/opencode/opencode.exe)
 ### Modifying Theme
 1. Edit CSS variables in `src/index.css` or the theme definitions in `src/constants/themes.ts`.
 2. Persisted via `localStorage['oc_theme']`.
-
-## Refactoring History
-
-### App.tsx Size Reduction (2026-04-27)
-Extracted the following from App.tsx to reduce its size from ~2,926 to ~2,631 lines:
-
-| Component | New Location | Lines |
-|-----------|-------------|-------|
-| Prism CSS | `src/styles/prism.css` | ~45 |
-| Theme definitions | `src/constants/themes.ts` | ~120 |
-| RightPanel | `src/components/ui/RightPanel.tsx` | ~90 |
-| AgentSelector | `src/components/app/AgentSelector.tsx` | ~55 |
-
-Skipped: ModelSelector (too coupled with session state), FileTreePanel (depends on many shared types)
-
-## Refactoring Status (2026-04-28)
-
-### Completed
-- ✅ Components extracted to `src/components/app/` (8 files)
-- ✅ PermissionCard - extracted
-- ✅ FontPicker - extracted
-- ✅ DirPicker - extracted
-- ✅ QuestionCard - extracted
-- ✅ McpForm - extracted
-- ✅ SettingsDialog - extracted
-- ✅ AgentSelector - extracted
-- ✅ RightPanel - extracted
-- ✅ Theme definitions - extracted to `src/constants/themes.ts`
-- ✅ Prism CSS - extracted to `src/styles/prism.css`
-- ✅ Unused Zustand stores removed (2026-04-28) - kept only preferencesStore for font management
-
-All inline components have been extracted. Refactoring complete!
-
-### How to Continue Refactoring
-1. Run `bun run build` to verify baseline
-2. For each component:
-   - Remove inline `function ComponentName` definition
-   - Keep the import at top of file
-   - Build and verify after each removal
-3. Update this file when complete
-
-All inline components have been extracted. Refactoring complete!
-
-### Remaining Large Components (Not Extracted)
-These components are tightly coupled with App.tsx state and could be extracted in the future with more refactoring:
-- **ModelSelector** (~200 lines) - coupled with session state
-- **FileTreePanel** (~400 lines) - depends on many shared types and utilities
 
 ## Troubleshooting
 
