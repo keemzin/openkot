@@ -145,7 +145,18 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
     setNewEnvInput('');
 
     // Gracefully reload OpenCode to make new provider available
-    await fetch('/restart', { method: 'POST' }).catch(() => {});
+    await fetch('/restart', { method: 'POST' });
+    // Poll health endpoint until ready, then reload
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        const res = await fetch('/health');
+        if (res.ok) {
+          const data = await res.json();
+          if (data.isOpenCodeReady) break;
+        }
+      } catch {}
+    }
     window.location.reload();
   };
 
@@ -549,7 +560,18 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
         <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <button onClick={async () => {
             if (!confirm('Restart OpenCode server? This will disconnect all sessions.')) return;
-            await fetch('/restart', { method: 'POST' }).catch(() => {});
+            await fetch('/restart', { method: 'POST' });
+            // Poll health endpoint until ready, then reload
+            for (let i = 0; i < 30; i++) {
+              await new Promise(r => setTimeout(r, 1000));
+              try {
+                const res = await fetch('/health');
+                if (res.ok) {
+                  const data = await res.json();
+                  if (data.isOpenCodeReady) break;
+                }
+              } catch {}
+            }
             window.location.reload();
           }} style={{ padding: '6px 12px', background: 'var(--red)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer' }}>Restart OpenCode</button>
           <div style={{ display: 'flex', gap: 8 }}>
