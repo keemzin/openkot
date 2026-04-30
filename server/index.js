@@ -1272,6 +1272,63 @@ async function start() {
     res.json(servers);
   });
 
+  // MCP status — proxy to OpenCode
+  app.get('/api/mcp/status', async (req, res) => {
+    try {
+      const response = await fetch(`http://${OPENCODE_HOST}:${OPENCODE_PORT}/mcp`, {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        return res.status(response.status).json({ error: 'Failed to get MCP status' });
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      console.error('[MCP status] Error:', error);
+      res.status(500).json({ error: error.message || 'Failed to get MCP status' });
+    }
+  });
+
+  // MCP connect — proxy to OpenCode
+  app.post('/api/mcp/:name/connect', async (req, res) => {
+    try {
+      const { name } = req.params;
+      const response = await fetch(`http://${OPENCODE_HOST}:${OPENCODE_PORT}/mcp/${name}/connect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Connection failed' }));
+        return res.status(response.status).json(error);
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      console.error(`[MCP connect] Error for ${req.params.name}:`, error);
+      res.status(500).json({ error: error.message || 'Connection failed' });
+    }
+  });
+
+  // MCP disconnect — proxy to OpenCode
+  app.post('/api/mcp/:name/disconnect', async (req, res) => {
+    try {
+      const { name } = req.params;
+      const response = await fetch(`http://${OPENCODE_HOST}:${OPENCODE_PORT}/mcp/${name}/disconnect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({ error: 'Disconnect failed' }));
+        return res.status(response.status).json(error);
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      console.error(`[MCP disconnect] Error for ${req.params.name}:`, error);
+      res.status(500).json({ error: error.message || 'Disconnect failed' });
+    }
+  });
+
   app.get('/api/config/mcp/:name', (req, res) => {
     const { name } = req.params;
     const config = readConfig();

@@ -44,6 +44,11 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
   const [restartStatus, setRestartStatus] = useState<'idle' | 'restarting' | 'done' | 'error'>('idle');
   const [restartError, setRestartError] = useState<string | null>(null);
 
+  // MCP runtime status: name → { status, error? }
+  type McpRuntimeStatus = { status: 'connected' | 'failed' | 'disabled' | 'needs_auth' | string; error?: string };
+  const [mcpStatus, setMcpStatus] = useState<Record<string, McpRuntimeStatus>>({});
+  const [mcpActionLoading, setMcpActionLoading] = useState<Record<string, string>>({}); // name → 'connecting'|'disconnecting'|'testing'
+
   // Models tab state
   const [customProviders, setCustomProviders] = useState<CustomProvider[]>([]);
   const [showAddProvider, setShowAddProvider] = useState(false);
@@ -86,6 +91,55 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
       .then(data => { if (Array.isArray(data)) setCommands(data); setCommandLoading(false); })
       .catch(() => setCommandLoading(false));
   }, []);
+
+  // Fetch MCP runtime status from OpenCode
+  const refreshMcpStatus = async () => {
+    try {
+      const r = await fetch('/api/mcp/status');
+      if (!r.ok) return;
+      const data = await r.json();
+      if (data && typeof data === 'object') setMcpStatus(data);
+    } catch {}
+  };
+
+  useEffect(() => {
+    refreshMcpStatus();
+    const interval = setInterval(refreshMcpStatus, 8000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleMcpConnect = async (name: string) => {
+    setMcpActionLoading(prev => ({ ...prev, [name]: 'connecting' }));
+    try {
+      await fetch(`/api/mcp/${name}/connect`, { method: 'POST' });
+      await refreshMcpStatus();
+    } catch {}
+    setMcpActionLoading(prev => { const n = { ...prev }; delete n[name]; return n; });
+  };
+
+  const handleMcpDisconnect = async (name: string) => {
+    setMcpActionLoading(prev => ({ ...prev, [name]: 'disconnecting' }));
+    try {
+      await fetch(`/api/mcp/${name}/disconnect`, { method: 'POST' });
+      await refreshMcpStatus();
+    } catch {}
+    setMcpActionLoading(prev => { const n = { ...prev }; delete n[name]; return n; });
+  };
+
+  const handleMcpTest = async (name: string) => {
+    setMcpActionLoading(prev => ({ ...prev, [name]: 'testing' }));
+    const wasConnected = mcpStatus[name]?.status === 'connected';
+    try {
+      await fetch(`/api/mcp/${name}/connect`, { method: 'POST' });
+      await refreshMcpStatus();
+      // If it wasn't connected before, disconnect after test (non-destructive test)
+      if (!wasConnected) {
+        await fetch(`/api/mcp/${name}/disconnect`, { method: 'POST' });
+        await refreshMcpStatus();
+      }
+    } catch {}
+    setMcpActionLoading(prev => { const n = { ...prev }; delete n[name]; return n; });
+  };
 
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
@@ -339,23 +393,92 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
                   <div style={{ fontSize: 14, color: 'var(--text-3)' }}>No MCP servers configured.</div>
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {mcpServers.map(server => (
-                      <div key={server.name} style={{ padding: '12px', background: 'var(--bg-2)', borderRadius: 4, marginBottom: 8 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                          <input type="checkbox" checked={server.enabled} onChange={() => toggleMcp(server.name)} style={{ accentColor: 'var(--accent)' }} />
-                          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{server.name}</span>
-                          <div style={{ flex: 1 }} />
-                          <button onClick={() => setEditingMcp(server)} style={{ padding: '4px 8px', background: 'var(--accent)', border: 'none', borderRadius: 3, color: 'white', cursor: 'pointer', fontSize: 12 }}>Edit</button>
-                          <button onClick={() => deleteMcp(server.name)} style={{ padding: '4px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 12 }}>Delete</button>
+                    {mcpServers.map(server => {
+                      const runtime = mcpStatus[server.name];
+                      const actionLoading = mcpActionLoading[server.name];
+                      const isConnected = runtime?.status === 'connected';
+                      const isFailed = runtime?.status === 'failed';
+                      const isDisabled = runtime?.status === 'disabled' || !server.enabled;
+
+                      const statusDot = isConnected
+                        ? { color: 'var(--green)', label: 'Connected' }
+                        : isFailed
+                        ? { color: 'var(--red)', label: 'Failed' }
+                        : isDisabled
+                        ? { color: 'var(--text-4)', label: 'Disabled' }
+                        : runtime
+                        ? { color: 'var(--orange)', label: runtime.status }
+                        : { color: 'var(--text-4)', label: 'Unknown' };
+
+                      return (
+                        <div key={server.name} style={{ padding: '12px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--border)' }}>
+                          {/* Header row */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                            <input type="checkbox" checked={server.enabled !== false} onChange={() => toggleMcp(server.name)} style={{ accentColor: 'var(--accent)', flexShrink: 0 }} />
+                            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{server.name}</span>
+                            {/* Status badge */}
+                            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: statusDot.color, background: `${statusDot.color}18`, padding: '2px 7px', borderRadius: 10, border: `1px solid ${statusDot.color}40` }}>
+                              <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusDot.color, display: 'inline-block', flexShrink: 0 }} />
+                              {statusDot.label}
+                            </span>
+                            <div style={{ flex: 1 }} />
+                            <button onClick={() => setEditingMcp(server)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Edit</button>
+                            <button onClick={() => deleteMcp(server.name)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Delete</button>
+                          </div>
+
+                          {/* Info row */}
+                          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 8, fontFamily: 'monospace' }}>
+                            {server.type === 'remote' ? server.url : server.command?.join(' ') || 'N/A'}
+                          </div>
+
+                          {/* Error message */}
+                          {isFailed && runtime?.error && (
+                            <div style={{ fontSize: 11, color: 'var(--red)', background: 'rgba(255,85,85,0.08)', padding: '4px 8px', borderRadius: 3, marginBottom: 8, fontFamily: 'monospace' }}>
+                              {runtime.error}
+                            </div>
+                          )}
+
+                          {/* Action buttons */}
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            {/* Connect / Disconnect */}
+                            <button
+                              disabled={!!actionLoading || !server.enabled}
+                              onClick={() => isConnected ? handleMcpDisconnect(server.name) : handleMcpConnect(server.name)}
+                              style={{
+                                padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading || !server.enabled ? 'not-allowed' : 'pointer',
+                                border: '1px solid var(--border)', background: 'transparent',
+                                color: actionLoading === 'connecting' || actionLoading === 'disconnecting' ? 'var(--text-4)' : isConnected ? 'var(--red)' : 'var(--accent)',
+                                opacity: !server.enabled ? 0.5 : 1,
+                              }}
+                            >
+                              {actionLoading === 'connecting' ? 'Connecting…' : actionLoading === 'disconnecting' ? 'Disconnecting…' : isConnected ? 'Disconnect' : 'Connect'}
+                            </button>
+
+                            {/* Test button */}
+                            <button
+                              disabled={!!actionLoading || !server.enabled}
+                              onClick={() => handleMcpTest(server.name)}
+                              style={{
+                                padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading || !server.enabled ? 'not-allowed' : 'pointer',
+                                border: '1px solid var(--border)', background: 'transparent',
+                                color: actionLoading === 'testing' ? 'var(--text-4)' : 'var(--text-3)',
+                                opacity: !server.enabled ? 0.5 : 1,
+                              }}
+                            >
+                              {actionLoading === 'testing' ? 'Testing…' : 'Test'}
+                            </button>
+
+                            {/* Refresh status */}
+                            <button
+                              disabled={!!actionLoading}
+                              onClick={refreshMcpStatus}
+                              style={{ padding: '3px 8px', fontSize: 11, borderRadius: 3, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-4)' }}
+                              title="Refresh status"
+                            >↻</button>
+                          </div>
                         </div>
-                        <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 2 }}>
-                          Command: {server.command?.join(' ') || 'N/A'}
-                        </div>
-                        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>
-                          Environment: {server.environment && Object.keys(server.environment).length > 0 ? JSON.stringify(server.environment) : 'None'}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
