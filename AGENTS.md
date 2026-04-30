@@ -116,6 +116,17 @@ OpenCode Binary (vendor/opencode/opencode.exe)
 - Server automatically enables MCP servers (searxng, fetch, etc.) on startup via the `/mcp` endpoint on OpenCode.
 - **Default OpenCode Port**: `3358` (set in `.env`). CLI auto-picks free ports.
 
+### MCP Tools Usage
+
+#### Sequential Thinking
+Use `sequential-thinking` MCP for complex, multi-step problems that require:
+- Breaking down complex problems into steps
+- Planning and design with room for revision
+- Analysis that might need course correction
+- Problems where the full scope isn't clear initially
+
+**DO NOT use** for simple tasks (listing files, reading single files, quick answers) — it adds unnecessary overhead.
+
 ## Common Tasks
 
 ### Adding a New Slash Command

@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from "fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, cpSync } from "fs";
 import { homedir } from "os";
 import { join, resolve, dirname } from "path";
 import { fileURLToPath } from "url";
@@ -88,6 +88,20 @@ async function cmdStart(directory: string, opts: { port?: number; opencodePort?:
   if (!existsSync(resolvedDir)) {
     console.error(`❌ Directory not found: ${resolvedDir}`);
     process.exit(1);
+  }
+
+  // Copy global .opencode config to workspace if not already present
+  if (resolvedDir !== PROJECT_ROOT) {
+    const sourceOpencode = join(PROJECT_ROOT, '.opencode');
+    const destOpencode = join(resolvedDir, '.opencode');
+    if (existsSync(sourceOpencode) && !existsSync(destOpencode)) {
+      console.log(`📋 Copying global MCP config to workspace: ${destOpencode}`);
+      try {
+        cpSync(sourceOpencode, destOpencode, { recursive: true });
+      } catch (e) {
+        console.error(`❌ Failed to copy config: ${e.message}`);
+      }
+    }
   }
 
   // Check dist exists (need to build first)

@@ -1144,10 +1144,14 @@ async function start() {
 
   function readConfig() {
     try {
+      if (!fs.existsSync(CONFIG_PATH)) {
+        console.log('Config file not found at:', CONFIG_PATH);
+        return {};
+      }
       const content = fs.readFileSync(CONFIG_PATH, 'utf8');
       return parseJsonc(content);
     } catch (e) {
-      console.log('Read config error:', e.message);
+      console.log('Read config error:', e.message, 'at:', CONFIG_PATH);
       return {};
     }
   }
