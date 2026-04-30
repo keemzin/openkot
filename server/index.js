@@ -49,55 +49,76 @@ const WORKING_DIR = process.env.WORKING_DIR
 
 let opencodeProcess = null;
 let currentWorkingDir = WORKING_DIR;
-let isOpenCodeReady = false; // New: track opencode readiness
+let isOpenCodeReady = false;
+let currentRestartPromise = null; // guard against concurrent restarts
+let lastOpenCodeError = null;
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+
+const hasProcessExited = (proc) => !proc || proc.exitCode !== null || proc.signalCode !== null;
+
+const waitForProcessClose = (proc, timeoutMs) => new Promise((resolve) => {
+  if (!proc || hasProcessExited(proc)) { resolve(true); return; }
+  let done = false;
+  const finish = (closed) => {
+    if (done) return;
+    done = true;
+    clearTimeout(timer);
+    proc.off('close', onClose);
+    proc.off('error', onError);
+    resolve(closed);
+  };
+  const onClose = () => finish(true);
+  const onError = () => finish(hasProcessExited(proc));
+  const timer = setTimeout(() => finish(hasProcessExited(proc)), timeoutMs);
+  proc.once('close', onClose);
+  proc.once('error', onError);
+});
 
 async function killOpenCode() {
   console.log('[OpenCode] Stopping previous instance...');
-  try {
-    let pidToKill = null;
-    if (opencodeProcess) {
-      pidToKill = opencodeProcess.pid;
-      opencodeProcess.kill();
-      opencodeProcess = null;
-    }
-
-    // On Windows, force kill the specific PID if available
-    if (process.platform === 'win32' && pidToKill) {
-      console.log('[OpenCode] Force killing PID', pidToKill);
-      const killProc = Bun.spawn({
-        cmd: ['taskkill', '/PID', String(pidToKill), '/T', '/F'],
-        stdout: 'pipe',
-        stderr: 'pipe',
-      });
-      const [stdout, stderr] = await Promise.all([
-        new Response(killProc.stdout).text(),
-        new Response(killProc.stderr).text()
-      ]);
-      console.log('[OpenCode] taskkill stdout:', stdout.trim());
-      console.log('[OpenCode] taskkill stderr:', stderr.trim());
-      await killProc.exited;
-      console.log('[OpenCode] taskkill exited with code', killProc.exitCode);
-    }
-
-    // Wait for cleanup
-    await new Promise(resolve => setTimeout(resolve, 3000));
-  } catch (e) {
-    console.log('[OpenCode] Error killing process:', e);
-  }
   isOpenCodeReady = false;
+
+  const proc = opencodeProcess?._child ?? null;
+  const pid  = opencodeProcess?.pid ?? null;
+  opencodeProcess = null;
+
+  if (!pid) return;
+
+  // Try graceful kill first
+  try { if (proc) proc.kill('SIGTERM'); } catch {}
+
+  if (proc && await waitForProcessClose(proc, 2500)) {
+    console.log('[OpenCode] Process exited cleanly.');
+    return;
+  }
+
+  // Windows: escalate through taskkill /T then /F
+  if (process.platform === 'win32') {
+    for (const flags of [['/pid', String(pid), '/t'], ['/pid', String(pid), '/f', '/t']]) {
+      try {
+        const { spawnSync } = await import('child_process');
+        spawnSync('taskkill', flags, { stdio: 'ignore', timeout: 5000, windowsHide: true });
+      } catch {}
+      if (!proc || hasProcessExited(proc)) break;
+      if (proc) await waitForProcessClose(proc, 1500);
+    }
+  } else {
+    try { if (proc) proc.kill('SIGKILL'); } catch {}
+    if (proc) await waitForProcessClose(proc, 1000);
+  }
+
+  console.log('[OpenCode] Kill sequence complete.');
 }
 
-async function waitForPortFree(port, timeoutMs = 2000) {
+async function waitForPortFree(port, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     const inUse = await new Promise((resolve) => {
       const sock = createConnection({ port, host: OPENCODE_HOST });
-      const t = setTimeout(() => { sock.destroy(); resolve(false); }, 300);
+      const t = setTimeout(() => { sock.destroy(); resolve(false); }, 400);
       sock.once('connect', () => { clearTimeout(t); sock.destroy(); resolve(true); });
-      sock.once('error', (err) => {
-        clearTimeout(t);
-        resolve(false);
-      });
+      sock.once('error', () => { clearTimeout(t); resolve(false); });
     });
     if (!inUse) { console.log(`[OpenCode] Port ${port} is free.`); return; }
     console.log(`[OpenCode] Waiting for port ${port} to be released...`);
@@ -106,73 +127,147 @@ async function waitForPortFree(port, timeoutMs = 2000) {
   console.warn(`[OpenCode] Timed out waiting for port ${port} to free — proceeding anyway.`);
 }
 
+// Wait for OpenCode API to actually respond (not just the process to start)
+async function waitForOpenCodeReady(timeoutMs = 20000) {
+  const base = `http://${OPENCODE_HOST}:${OPENCODE_PORT}`;
+  const deadline = Date.now() + timeoutMs;
+  let lastErr = null;
+
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`${base}/session`, { signal: AbortSignal.timeout(2000) });
+      if (res.ok || res.status === 401 || res.status === 404) {
+        isOpenCodeReady = true;
+        lastOpenCodeError = null;
+        console.log('[OpenCode] API is ready.');
+        return;
+      }
+    } catch (e) {
+      lastErr = e;
+    }
+    await new Promise(r => setTimeout(r, 400));
+  }
+
+  const msg = `Timed out waiting for OpenCode API to respond. Last error: ${lastErr?.message ?? 'unknown'}`;
+  lastOpenCodeError = msg;
+  throw new Error(msg);
+}
+
+async function spawnOpenCode(dir) {
+  console.log(`[OpenCode] Spawning in ${dir}...`);
+  console.log(`[OpenCode] Binary: ${VENDOR_OPENCODE}`);
+
+  const proc = Bun.spawn({
+    cmd: [VENDOR_OPENCODE, 'serve', '--port', String(OPENCODE_PORT), '--hostname', OPENCODE_HOST],
+    cwd: dir,
+    stdout: 'pipe',
+    stderr: 'pipe',
+  });
+
+  console.log('[OpenCode] Started with PID:', proc.pid);
+
+  // Attach a native child_process handle for kill signalling
+  // Bun.spawn returns a Bun process — wrap it so waitForProcessClose works
+  const bunProc = proc;
+  const fakeChild = {
+    pid: proc.pid,
+    exitCode: null,
+    signalCode: null,
+    kill: (sig) => proc.kill(sig),
+    off: () => {},
+    once: (event, cb) => {
+      if (event === 'close' || event === 'exit') {
+        bunProc.exited.then(() => { fakeChild.exitCode = bunProc.exitCode ?? 0; cb(); }).catch(() => cb());
+      }
+    },
+  };
+
+  opencodeProcess = { kill: (sig) => proc.kill(sig), pid: proc.pid, _child: fakeChild };
+
+  // Wait for the "listening" line in stdout/stderr
+  await new Promise((resolve, reject) => {
+    let stdoutBuf = '';
+    let stderrBuf = '';
+    const dec = new TextDecoder();
+    let done = false;
+
+    const finish = (fn, val) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      fn(val);
+    };
+
+    const checkReady = (text) => {
+      if (text.includes('opencode server listening') || text.includes('kilo server listening') || text.includes('listening')) {
+        finish(resolve, text);
+        return true;
+      }
+      return false;
+    };
+
+    const timer = setTimeout(() => {
+      proc.kill();
+      finish(reject, new Error(`Timeout waiting for OpenCode to start.\nstdout: ${stdoutBuf}\nstderr: ${stderrBuf}`));
+    }, 30000);
+
+    (async () => {
+      for await (const chunk of proc.stdout) {
+        stdoutBuf += dec.decode(chunk);
+        if (checkReady(stdoutBuf)) return;
+      }
+    })().catch(() => {});
+
+    (async () => {
+      for await (const chunk of proc.stderr) {
+        stderrBuf += dec.decode(chunk);
+        if (checkReady(stderrBuf)) return;
+      }
+    })().catch(() => {});
+
+    proc.exited.then((code) => {
+      finish(reject, new Error(`OpenCode exited with code ${code}.\nstdout: ${stdoutBuf}\nstderr: ${stderrBuf}`));
+    }).catch((e) => finish(reject, e));
+  });
+
+  console.log('[OpenCode] Process signalled ready, verifying API...');
+}
+
 async function startOpenCode(cwd) {
   const dir = cwd || currentWorkingDir;
   await killOpenCode();
   await waitForPortFree(OPENCODE_PORT, 10000);
   currentWorkingDir = dir;
-  console.log(`[OpenCode] Starting in ${dir}...`);
-  console.log(`[OpenCode] Binary: ${VENDOR_OPENCODE}`);
-  
+
   try {
-    const proc = Bun.spawn({
-      cmd: [VENDOR_OPENCODE, 'serve', '--port', String(OPENCODE_PORT), '--hostname', OPENCODE_HOST],
-      cwd: dir,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    console.log('[OpenCode] Started with PID:', proc.pid);
-    opencodeProcess = { 
-      kill: () => proc.kill(), 
-      pid: proc.pid,
-    };
-
-    // New: Wait for stdout/stderr signal that opencode is ready
-    await new Promise(async (resolve, reject) => {
-      let stdoutBuffer = '';
-      let stderrBuffer = '';
-      const textDecoder = new TextDecoder();
-
-      const checkReady = (output) => {
-        if (output.includes('opencode server listening') || output.includes('kilo server listening') || output.includes('listening')) {
-          clearTimeout(timer);
-          isOpenCodeReady = true;
-          resolve(output);
-          return true;
-        }
-        return false;
-      };
-
-      const timer = setTimeout(() => {
-        proc.kill(); // Kill the process if it times out
-        reject(new Error('Timeout waiting for OpenCode to start. stdout: ' + stdoutBuffer + ' stderr: ' + stderrBuffer));
-      }, 30000); // 30s timeout
-
-      // Consume stdout and stderr in parallel
-      const consumeStdout = async () => {
-        for await (const chunk of proc.stdout) {
-          stdoutBuffer += textDecoder.decode(chunk);
-          if (checkReady(stdoutBuffer)) return;
-        }
-      };
-
-      const consumeStderr = async () => {
-        for await (const chunk of proc.stderr) {
-          stderrBuffer += textDecoder.decode(chunk);
-          if (checkReady(stderrBuffer)) return; // Check stderr for ready signal too
-        }
-      };
-      
-      Promise.race([consumeStdout(), consumeStderr()]).catch(reject); // Start consuming both streams
-      // Bun.spawn uses proc.exited (a Promise) instead of proc.on('exit')
-      proc.exited.then((code) => { clearTimeout(timer); reject(new Error(`OpenCode exited with code ${code}. stdout: ${stdoutBuffer} stderr: ${stderrBuffer}`)); }).catch(reject);
-    });
-    console.log('[OpenCode] Ready!');
+    await spawnOpenCode(dir);
+    await waitForOpenCodeReady(20000);
+    console.log('[OpenCode] Fully ready!');
   } catch (e) {
-    console.error('[OpenCode] Spawn error:', e);
-    isOpenCodeReady = false; // Reset readiness on error
+    console.error('[OpenCode] Start error:', e.message);
+    isOpenCodeReady = false;
+    lastOpenCodeError = e.message;
     throw e;
   }
+}
+
+async function restartOpenCode(cwd) {
+  // Deduplicate concurrent restart calls
+  if (currentRestartPromise) {
+    console.log('[OpenCode] Restart already in progress, waiting...');
+    return currentRestartPromise;
+  }
+
+  currentRestartPromise = (async () => {
+    isOpenCodeReady = false;
+    try {
+      await startOpenCode(cwd || currentWorkingDir);
+    } finally {
+      currentRestartPromise = null;
+    }
+  })();
+
+  return currentRestartPromise;
 }
 
 function directoryResolver(req, res, next) {
@@ -211,7 +306,13 @@ async function start() {
   // Health check — exposes feature flags and opencode readiness
   app.get('/health', (_req, res) => {
     const planMode = process.env.PLAN_MODE === '1' || process.env.PLAN_MODE === 'true';
-    res.json({ ok: true, planModeExperimentalEnabled: planMode, isOpenCodeReady: isOpenCodeReady });
+    res.json({
+      ok: true,
+      planModeExperimentalEnabled: planMode,
+      isOpenCodeReady: isOpenCodeReady,
+      isRestarting: currentRestartPromise !== null,
+      lastError: lastOpenCodeError ?? null,
+    });
   });
   // Expose server config to the frontend before the proxy
   app.get('/config', (_req, res) => {
@@ -236,21 +337,14 @@ async function start() {
   });
 
   // Restart server — stops and restarts opencode
-  app.post('/restart', async (_req, res) => {
-    try {
-      await startOpenCode(currentWorkingDir);
-      const start = Date.now();
-      while (Date.now() - start < 15000) {
-        await new Promise(r => setTimeout(r, 500));
-        try {
-          const check = await fetch(`http://${OPENCODE_HOST}:${OPENCODE_PORT}/session`, { signal: AbortSignal.timeout(1000) });
-          if (check.ok || check.status === 401) break;
-        } catch { /* not ready yet */ }
-      }
-      res.json({ ok: true });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
+  // Responds immediately; client polls /health for isOpenCodeReady
+  app.post('/restart', (_req, res) => {
+    res.json({ ok: true, message: 'Restart initiated' });
+    // Fire-and-forget restart so the HTTP response is not blocked
+    restartOpenCode(currentWorkingDir).catch(err => {
+      console.error('[restart] Failed:', err.message);
+      lastOpenCodeError = err.message;
+    });
   });
 
   // ── Terminal — copied from openchamber ──────────────────────────────────────
