@@ -386,7 +386,6 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
                   <button onClick={() => setShowAddMcp(true)} style={{ padding: '4px 8px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}>Add</button>
                 </div>
                 {showAddMcp && <McpForm onSave={addMcp} onCancel={() => setShowAddMcp(false)} />}
-                {editingMcp && <McpForm initial={editingMcp} onSave={(updates) => updateMcp(editingMcp.name, updates)} onCancel={() => setEditingMcp(null)} />}
                 {loading ? (
                   <div style={{ fontSize: 14, color: 'var(--text-3)' }}>Loading...</div>
                 ) : mcpServers.length === 0 ? (
@@ -411,71 +410,77 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
                         : { color: 'var(--text-4)', label: 'Unknown' };
 
                       return (
-                        <div key={server.name} style={{ padding: '12px', background: 'var(--bg-2)', borderRadius: 4, border: '1px solid var(--border)' }}>
-                          {/* Header row */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                            <input type="checkbox" checked={server.enabled !== false} onChange={() => toggleMcp(server.name)} style={{ accentColor: 'var(--accent)', flexShrink: 0 }} />
-                            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{server.name}</span>
-                            {/* Status badge */}
-                            <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: statusDot.color, background: `${statusDot.color}18`, padding: '2px 7px', borderRadius: 10, border: `1px solid ${statusDot.color}40` }}>
-                              <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusDot.color, display: 'inline-block', flexShrink: 0 }} />
-                              {statusDot.label}
-                            </span>
-                            <div style={{ flex: 1 }} />
-                            <button onClick={() => setEditingMcp(server)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Edit</button>
-                            <button onClick={() => deleteMcp(server.name)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Delete</button>
-                          </div>
+                        <div key={server.name} style={{ borderRadius: 4, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                          {/* Inline edit form — replaces card content when editing */}
+                          {editingMcp?.name === server.name ? (
+                            <McpForm
+                              initial={editingMcp}
+                              onSave={(updates) => updateMcp(editingMcp.name, updates)}
+                              onCancel={() => setEditingMcp(null)}
+                            />
+                          ) : (
+                            <div style={{ padding: '12px', background: 'var(--bg-2)' }}>
+                              {/* Header row */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                                <input type="checkbox" checked={server.enabled !== false} onChange={() => toggleMcp(server.name)} style={{ accentColor: 'var(--accent)', flexShrink: 0 }} />
+                                <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{server.name}</span>
+                                {/* Status badge */}
+                                <span style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11, color: statusDot.color, background: `${statusDot.color}18`, padding: '2px 7px', borderRadius: 10, border: `1px solid ${statusDot.color}40` }}>
+                                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusDot.color, display: 'inline-block', flexShrink: 0 }} />
+                                  {statusDot.label}
+                                </span>
+                                <div style={{ flex: 1 }} />
+                                <button onClick={() => setEditingMcp(server)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Edit</button>
+                                <button onClick={() => deleteMcp(server.name)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Delete</button>
+                              </div>
 
-                          {/* Info row */}
-                          <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 8, fontFamily: 'monospace' }}>
-                            {server.type === 'remote' ? server.url : server.command?.join(' ') || 'N/A'}
-                          </div>
+                              {/* Info row */}
+                              <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 8, fontFamily: 'monospace' }}>
+                                {server.type === 'remote' ? server.url : server.command?.join(' ') || 'N/A'}
+                              </div>
 
-                          {/* Error message */}
-                          {isFailed && runtime?.error && (
-                            <div style={{ fontSize: 11, color: 'var(--red)', background: 'rgba(255,85,85,0.08)', padding: '4px 8px', borderRadius: 3, marginBottom: 8, fontFamily: 'monospace' }}>
-                              {runtime.error}
+                              {/* Error message */}
+                              {isFailed && runtime?.error && (
+                                <div style={{ fontSize: 11, color: 'var(--red)', background: 'rgba(255,85,85,0.08)', padding: '4px 8px', borderRadius: 3, marginBottom: 8, fontFamily: 'monospace' }}>
+                                  {runtime.error}
+                                </div>
+                              )}
+
+                              {/* Action buttons */}
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button
+                                  disabled={!!actionLoading || !server.enabled}
+                                  onClick={() => isConnected ? handleMcpDisconnect(server.name) : handleMcpConnect(server.name)}
+                                  style={{
+                                    padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading || !server.enabled ? 'not-allowed' : 'pointer',
+                                    border: '1px solid var(--border)', background: 'transparent',
+                                    color: actionLoading === 'connecting' || actionLoading === 'disconnecting' ? 'var(--text-4)' : isConnected ? 'var(--red)' : 'var(--accent)',
+                                    opacity: !server.enabled ? 0.5 : 1,
+                                  }}
+                                >
+                                  {actionLoading === 'connecting' ? 'Connecting…' : actionLoading === 'disconnecting' ? 'Disconnecting…' : isConnected ? 'Disconnect' : 'Connect'}
+                                </button>
+                                <button
+                                  disabled={!!actionLoading || !server.enabled}
+                                  onClick={() => handleMcpTest(server.name)}
+                                  style={{
+                                    padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading || !server.enabled ? 'not-allowed' : 'pointer',
+                                    border: '1px solid var(--border)', background: 'transparent',
+                                    color: actionLoading === 'testing' ? 'var(--text-4)' : 'var(--text-3)',
+                                    opacity: !server.enabled ? 0.5 : 1,
+                                  }}
+                                >
+                                  {actionLoading === 'testing' ? 'Testing…' : 'Test'}
+                                </button>
+                                <button
+                                  disabled={!!actionLoading}
+                                  onClick={refreshMcpStatus}
+                                  style={{ padding: '3px 8px', fontSize: 11, borderRadius: 3, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-4)' }}
+                                  title="Refresh status"
+                                >↻</button>
+                              </div>
                             </div>
                           )}
-
-                          {/* Action buttons */}
-                          <div style={{ display: 'flex', gap: 6 }}>
-                            {/* Connect / Disconnect */}
-                            <button
-                              disabled={!!actionLoading || !server.enabled}
-                              onClick={() => isConnected ? handleMcpDisconnect(server.name) : handleMcpConnect(server.name)}
-                              style={{
-                                padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading || !server.enabled ? 'not-allowed' : 'pointer',
-                                border: '1px solid var(--border)', background: 'transparent',
-                                color: actionLoading === 'connecting' || actionLoading === 'disconnecting' ? 'var(--text-4)' : isConnected ? 'var(--red)' : 'var(--accent)',
-                                opacity: !server.enabled ? 0.5 : 1,
-                              }}
-                            >
-                              {actionLoading === 'connecting' ? 'Connecting…' : actionLoading === 'disconnecting' ? 'Disconnecting…' : isConnected ? 'Disconnect' : 'Connect'}
-                            </button>
-
-                            {/* Test button */}
-                            <button
-                              disabled={!!actionLoading || !server.enabled}
-                              onClick={() => handleMcpTest(server.name)}
-                              style={{
-                                padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading || !server.enabled ? 'not-allowed' : 'pointer',
-                                border: '1px solid var(--border)', background: 'transparent',
-                                color: actionLoading === 'testing' ? 'var(--text-4)' : 'var(--text-3)',
-                                opacity: !server.enabled ? 0.5 : 1,
-                              }}
-                            >
-                              {actionLoading === 'testing' ? 'Testing…' : 'Test'}
-                            </button>
-
-                            {/* Refresh status */}
-                            <button
-                              disabled={!!actionLoading}
-                              onClick={refreshMcpStatus}
-                              style={{ padding: '3px 8px', fontSize: 11, borderRadius: 3, cursor: 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-4)' }}
-                              title="Refresh status"
-                            >↻</button>
-                          </div>
                         </div>
                       );
                     })}
@@ -641,9 +646,6 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
                 {showAddCommand && (
                   <CommandEditor command={newCommand} onSave={saveCommand} onCancel={() => { setShowAddCommand(false); setNewCommand({ file: '', name: '', description: '', agent: 'build', content: '' }); }} />
                 )}
-                {editingCommand && (
-                  <CommandEditor command={editingCommand} onSave={(cmd) => { saveCommand(cmd); setEditingCommand(null); setEditingCommandDraft(null); }} onCancel={() => { setEditingCommand(null); setEditingCommandDraft(null); }} />
-                )}
                 {commandLoading ? (
                   <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Loading...</div>
                 ) : commands.length === 0 ? (
@@ -651,15 +653,25 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
                 ) : (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {commands.map(cmd => (
-                      <div key={cmd.file} style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 4 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{cmd.name}</span>
-                          <span style={{ fontSize: 10, color: 'var(--text-4)', background: 'var(--bg-3)', padding: '1px 6px', borderRadius: 3 }}>{cmd.agent}</span>
-                          <button onClick={() => setEditingCommand(cmd)} style={{ padding: '3px 8px', background: 'var(--accent)', border: 'none', borderRadius: 3, color: 'white', cursor: 'pointer', fontSize: 11 }}>Edit</button>
-                          <button onClick={() => deleteCommand(cmd.file)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Delete</button>
-                        </div>
-                        <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 2 }}>{cmd.description}</div>
-                        <div style={{ fontSize: 11, color: 'var(--text-4)', whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>{cmd.content.slice(0, 100)}{cmd.content.length > 100 ? '...' : ''}</div>
+                      <div key={cmd.file} style={{ borderRadius: 4, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                        {editingCommand?.file === cmd.file ? (
+                          <CommandEditor
+                            command={editingCommand}
+                            onSave={(updated) => { saveCommand(updated); setEditingCommand(null); setEditingCommandDraft(null); }}
+                            onCancel={() => { setEditingCommand(null); setEditingCommandDraft(null); }}
+                          />
+                        ) : (
+                          <div style={{ padding: '10px 12px', background: 'var(--bg-2)' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{cmd.name}</span>
+                              <span style={{ fontSize: 10, color: 'var(--text-4)', background: 'var(--bg-3)', padding: '1px 6px', borderRadius: 3 }}>{cmd.agent}</span>
+                              <button onClick={() => setEditingCommand(cmd)} style={{ padding: '3px 8px', background: 'var(--accent)', border: 'none', borderRadius: 3, color: 'white', cursor: 'pointer', fontSize: 11 }}>Edit</button>
+                              <button onClick={() => deleteCommand(cmd.file)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Delete</button>
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 2 }}>{cmd.description}</div>
+                            <div style={{ fontSize: 11, color: 'var(--text-4)', whiteSpace: 'pre-wrap', maxHeight: 60, overflow: 'hidden' }}>{cmd.content.slice(0, 100)}{cmd.content.length > 100 ? '...' : ''}</div>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
