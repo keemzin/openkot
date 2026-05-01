@@ -17,7 +17,7 @@ OpenCode Binary (vendor/opencode/opencode.exe)
 
 ## Key Architecture Principles
 
-1. **Component-based architecture**: `src/App.tsx` (~2,600 lines) remains the main orchestrator; UI components are in `src/components/` (chat, git, filetree, terminal, ui, app).
+1. **Component-based architecture**: `src/App.tsx` (~1,400 lines) is the main orchestrator; UI components are in `src/components/` (chat, git, filetree, terminal, ui, app). Custom hooks are in `src/hooks/` (useSessionEvents).
 2. **Local state management**: UI state (theme, sidebar, models, agents, sessions) uses React local state with useState hooks. No external state library is used.
 3. **Proxy pattern**: Server proxies most `/api/*` requests to OpenCode, handles filesystem/git/terminal/question directly.
 4. **OpenCode compatibility**: Uses the same API contracts as the OpenCode CLI.
@@ -31,34 +31,26 @@ OpenCode Binary (vendor/opencode/opencode.exe)
 
 ```
 ├── src/
-│   ├── App.tsx              # Main orchestrator (~2,600 lines)
+│   ├── App.tsx              # Main orchestrator (~1,400 lines)
 │   ├── stores/
 │   │   └── preferencesStore.ts # Font preferences (used by FontPicker)
+│   ├── hooks/           # Custom React hooks
+│   │   └── useSessionEvents.ts # SSE event handling (extracted from App.tsx)
 │   ├── constants/         # Static constants (themes.ts)
 │   ├── styles/            # CSS files (prism.css)
 │   ├── components/
-│   │   ├── app/          # App-level components (AgentSelector, DirPicker, FontPicker, McpForm, PermissionCard, QuestionCard, SettingsDialog)
+│   │   ├── app/          # App-level components (AgentSelector, DirPicker, FontPicker, McpForm, PermissionCard, QuestionCard, SettingsDialog, Sidebar)
 │   │   ├── chat/         # Chat components
 │   │   ├── git/          # Git components
 │   │   ├── filetree/     # File tree components
 │   │   ├── terminal/     # Terminal components
-│   │   └── ui/          # UI primitives
+│   │   ├── ui/          # UI primitives
+│   │   ├── Sidebar.tsx    # Session sidebar (extracted from App.tsx)
+│   │   └── ModelSelector.tsx # Model selection dropdown (extracted from App.tsx)
 │   ├── utils/           # Shared utilities
 │   ├── index.css        # Global styles + CSS variables
 │   ├── main.tsx         # React entry point
 │   └── types.ts        # TypeScript interfaces
-├── server/
-│   └── index.js         # Express server (~1,200 lines) with OpenCode proxy + direct APIs
-├── .opencode/
-│   ├── commands/        # Slash commands (dive.md, explore.md, etc.)
-│   ├── skills/          # Specialized toolsets (crawl4ai, etc.)
-│   ├── opencode.jsonc   # OpenCode configuration (MCP, etc.)
-│   └── package.json     # MCP tool dependencies
-├── vendor/
-│   └── opencode/
-│       └── opencode.exe # OpenCode binary (Windows)
-├── .env                 # Configuration (ports, paths, version)
-└── WORKSPACE/           # Current working directory for this instance
 ```
 
 ## Important Rules
