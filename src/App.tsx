@@ -2,6 +2,7 @@
 import { marked } from 'marked';
 import { TokenUsageIndicator } from './components/ui/TokenUsageIndicator';
 import { uid, getContextUsage, fallbackCopy } from './utils/helpers';
+import { useSessionEvents } from './hooks/useSessionEvents';
 import { MobileTerminal } from './components/terminal/MobileTerminal';
 import { DesktopTerminal } from './components/terminal/DesktopTerminal';
 import { ChatMessage } from './components/chat/ChatMessage';
@@ -166,7 +167,6 @@ function App() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const eventSourceRef = useRef<EventSource | null>(null);
   const sessionIdRef = useRef<string | null>(null);
 
   // Keep ref in sync with state so callbacks always see latest value
@@ -174,6 +174,21 @@ function App() {
     sessionIdRef.current = sessionId;
     (window as any).__opencode_session_id__ = sessionId ?? '';
   }, [sessionId]);
+
+  // Session events hook (extracted from App.tsx for better maintainability)
+  const { listenToSession, stopListening } = useSessionEvents({
+    autopilotRef,
+    getWorkingDir,
+    onMessageUpdate: (updater) => setMessages(updater),
+    onPartsUpdate: (updater) => setPartsMap(updater),
+    onStreamingMsgId: (id) => setStreamingMsgId(id),
+    onBusySessions: (updater) => setBusySessions(updater),
+    onError: (error) => setError(error),
+    onLoading: (loading) => setIsLoading(loading),
+    onQuestionsUpdate: (updater) => setQuestions(updater),
+    onPermissionsUpdate: (updater) => setPermissions(updater),
+    onSessionIdle: () => loadSessions(),
+  });
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, partsMap]);
 
@@ -472,7 +487,7 @@ function App() {
       if (forked?.id) {
         await loadSessions();
         // Switch to the forked session
-        if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null; }
+        stopListening();
         setIsLoading(false); setError(null); setStreamingMsgId(null);
         setSessionId(forked.id); setMessages([]); setPartsMap({});
         await loadSessionMessages(forked.id);
@@ -532,197 +547,8 @@ function App() {
     } catch { /* ignore — optimistic state already applied */ }
   }, [messages, loadSessionMessages]);
 
-  const listenToSession = useCallback((sid: string, tempAssistantId: string, isOngoing: boolean = false) => {
-    if (eventSourceRef.current) eventSourceRef.current.close();
-    const dir = getWorkingDir();
-    const es = new EventSource(`/api/event?directory=${encodeURIComponent(dir)}`);
-    eventSourceRef.current = es;
-
-    // Mark this session as busy immediately (only for new sends, not ongoing)
-    if (!isOngoing) {
-      setBusySessions(prev => new Set(prev).add(sid));
-    }
-
-    es.onmessage = (e) => {
-      try {
-        const payload = JSON.parse(e.data);
-        const type = payload?.type;
-        const evtSid = payload?.properties?.part?.sessionID ?? payload?.properties?.info?.sessionID ?? payload?.properties?.sessionID;
-        if (evtSid && evtSid !== sid) return;
-
-        if (type === 'message.part.updated') {
-          const part: Part = payload?.properties?.part;
-          if (!part?.id) return;
-          // Log all parts to understand structure
-          console.log('[part]', part.type, JSON.stringify(part).slice(0, 300));
-          const msgId = (part as any).messageID ?? tempAssistantId;
-          // Replace temp placeholder with real server message id
-          setMessages(prev => {
-            if (prev.some(m => m.id === msgId)) return prev;
-            // swap temp id for real id
-            return prev.map(m => m.id === tempAssistantId ? { ...m, id: msgId } : m);
-          });
-          setStreamingMsgId(msgId);
-          setPartsMap(prev => {
-            // migrate parts from temp id to real id
-            const base = (prev as Record<string, Part[]>)[msgId] ?? (prev as Record<string, Part[]>)[tempAssistantId] ?? [];
-            const existing = base;
-            const idx = existing.findIndex(p => p.id === part.id);
-            const next = [...existing];
-            if (idx >= 0) next[idx] = part; else next.push(part);
-            const updated: Record<string, Part[]> = { ...prev, [msgId]: next };
-            if (msgId !== tempAssistantId) delete updated[tempAssistantId];
-            return updated;
-          });
-        }
-
-        if (type === 'message.updated') {
-          const info = payload?.properties?.info;
-          if (!info?.id) return;
-          setMessages(prev => {
-            if (prev.some(m => m.id === info.id)) {
-              // Update token/cost data on existing message
-              if (info.role === 'assistant' && (info.tokens || info.cost || info.model)) {
-                return prev.map(m => m.id === info.id ? {
-                  ...m,
-                  tokens: info.tokens,
-                  cost: info.cost,
-                  model: info.model,
-                } : m);
-              }
-              return prev;
-            }
-            if (info.role === 'user') {
-              // replace temp user placeholder
-              if (prev.some(m => m.id.startsWith('temp_user_'))) {
-                const tempId = prev.find(m => m.id.startsWith('temp_user_'))?.id;
-                if (tempId) {
-                  // migrate parts from temp id to real id
-                  setPartsMap((pm: Record<string, Part[]>) => {
-                    if (!pm[tempId]) return pm;
-                    const next: Record<string, Part[]> = { ...pm, [info.id]: pm[tempId] };
-                    delete next[tempId];
-                    return next;
-                  });
-                }
-                return prev.map(m => m.id.startsWith('temp_user_') ? { id: info.id, role: info.role, content: '' } : m);
-              }
-            }
-            if (info.role === 'assistant') {
-              // replace temp assistant placeholder
-              if (prev.some(m => m.id === tempAssistantId)) {
-                return prev.map(m => m.id === tempAssistantId ? { id: info.id, role: info.role, content: '' } : m);
-              }
-            }
-            return [...prev, { id: info.id, role: info.role, content: '' }];
-          });
-          if (info.role === 'assistant') setStreamingMsgId(info.id);
-        }
-
-        if (type === 'session.idle') {
-          setIsLoading(false); setStreamingMsgId(null);
-          setBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
-          es.close(); eventSourceRef.current = null; loadSessions();
-        }
-
-        if (type === 'session.error') {
-          setError(payload?.properties?.error?.message ?? 'Unknown error');
-          setIsLoading(false); setStreamingMsgId(null);
-          setBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
-          es.close(); eventSourceRef.current = null;
-        }
-
-        if (type === 'question.asked') {
-          console.log('[SSE] question.asked event received:', payload);
-          const question = payload?.properties as QuestionRequest;
-          if (question?.id && question.sessionID) {
-            console.log('[SSE] Adding question to state:', { id: question.id, sessionID: question.sessionID, questions: question.questions });
-            setQuestions(prev => {
-              const sessionQuestions = prev[question.sessionID] ?? [];
-              const idx = sessionQuestions.findIndex(q => q.id === question.id);
-              const next = [...sessionQuestions];
-              if (idx >= 0) next[idx] = question;
-              else next.push(question);
-              console.log('[SSE] Updated questions state:', { ...prev, [question.sessionID]: next });
-              return { ...prev, [question.sessionID]: next };
-            });
-          } else {
-            console.warn('[SSE] question.asked: missing id or sessionID:', question);
-          }
-        }
-
-        if (type === 'question.replied' || type === 'question.rejected') {
-          console.log('[SSE] question reply/reject event received:', type, payload);
-          const props = payload?.properties as { sessionID?: string; requestID?: string };
-          if (props.sessionID && props.requestID) {
-            console.log('[SSE] Removing question from state:', { sessionID: props.sessionID, requestID: props.requestID });
-            setQuestions(prev => {
-              const sessionQuestions = prev[props.sessionID!] ?? [];
-              const filtered = sessionQuestions.filter(q => q.id !== props.requestID);
-              if (filtered.length === 0) {
-                const next = { ...prev };
-                delete next[props.sessionID!];
-                return next;
-              }
-              return { ...prev, [props.sessionID!]: filtered };
-            });
-          }
-        }
-
-        if (type === 'permission.asked') {
-          console.log('[SSE] permission.asked event received:', payload);
-          const permission = payload?.properties as PermissionRequest;
-          if (permission?.id && permission.sessionID) {
-            // If autopilot is on, auto-approve without showing the card
-            if (autopilotRef.current) {
-              console.log('[SSE] autopilot on — auto-approving permission:', permission.id);
-              const dir = getWorkingDir();
-              fetch('/api/permission/reply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sessionID: permission.sessionID, requestID: permission.id, reply: 'always', directory: dir }),
-              }).catch(e => console.error('[autopilot] permission auto-reply failed:', e));
-            } else {
-              setPermissions(prev => {
-                const sessionPermissions = prev[permission.sessionID] ?? [];
-                const idx = sessionPermissions.findIndex(p => p.id === permission.id);
-                const next = [...sessionPermissions];
-                if (idx >= 0) next[idx] = permission;
-                else next.push(permission);
-                return { ...prev, [permission.sessionID]: next };
-              });
-            }
-          }
-        }
-
-        if (type === 'permission.replied' || type === 'permission.rejected') {
-          console.log('[SSE] permission reply/reject event received:', type, payload);
-          const props = payload?.properties as { sessionID?: string; requestID?: string };
-          if (props.sessionID && props.requestID) {
-            setPermissions(prev => {
-              const sessionPermissions = prev[props.sessionID!] ?? [];
-              const filtered = sessionPermissions.filter(p => p.id !== props.requestID);
-              if (filtered.length === 0) {
-                const next = { ...prev };
-                delete next[props.sessionID!];
-                return next;
-              }
-              return { ...prev, [props.sessionID!]: filtered };
-            });
-          }
-        }
-      } catch {}
-    };
-
-    es.onerror = () => {
-      setIsLoading(false); setStreamingMsgId(null);
-      setBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
-      es.close(); eventSourceRef.current = null;
-    };
-  }, [loadSessions]);
-
   const switchSession = useCallback(async (sid: string) => {
-    if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null; }
+    stopListening();
     setIsLoading(false); setError(null); setStreamingMsgId(null);
     setSessionId(sid); setMessages([]); setPartsMap({});
     setActiveTab('chat');
@@ -744,13 +570,13 @@ function App() {
     
     // Save last active session for auto-restore on refresh
     saveLastSession(workingDir, sid);
-  }, [loadSessionMessages, sessionModelSelections, models, loadSessionStatus, busySessions, listenToSession, workingDir, saveLastSession]);
+  }, [loadSessionMessages, sessionModelSelections, models, loadSessionStatus, busySessions, stopListening, listenToSession, workingDir, saveLastSession]);
 
   const newSession = useCallback(() => {
-    if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null; }
+    stopListening();
     setIsLoading(false); setError(null); setStreamingMsgId(null);
     setSessionId(null); setMessages([]); setPartsMap({});
-  }, []);
+  }, [stopListening]);
 
   const getOrCreateSession = useCallback(async (): Promise<string> => {
     // Use ref to always get the latest sessionId, not a stale closure value
@@ -772,7 +598,6 @@ function App() {
 
   const sendMessage = async () => {
     const text = inputText.trim();
-    console.log('sendMessage called, text:', text, 'agent:', selectedAgent);
     if (!text || isLoading || !selectedModel || !workingDir) return;
     setError(null);
 
@@ -809,10 +634,8 @@ function App() {
 
     try {
       const sid = await getOrCreateSession();
-      console.log('session:', sid, 'agent:', selectedAgent);
       listenToSession(sid, tempAssistantId);
       const dir = getWorkingDir();
-      console.log('sending to:', `/api/session/${encodeURIComponent(sid)}/prompt_async`);
       const r = await fetch(`/api/session/${encodeURIComponent(sid)}/prompt_async?directory=${encodeURIComponent(dir)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -821,15 +644,13 @@ function App() {
           agent: selectedAgent, // Send agent field to OpenCode
           autopilot: autopilot // Send autopilot toggle to OpenCode
           }),
-
+        
       });
-      console.log('response:', r.status);
       if (!r.ok) { const d = await r.text().catch(() => ''); throw new Error(`Prompt error: ${r.status}${d ? ` - ${d}` : ''}`); }
     } catch (err) {
-      console.log('error:', err);
       setMessages(prev => prev.filter(m => m.id !== tempAssistantId && m.id !== tempUserMsgId));
       setIsLoading(false); setStreamingMsgId(null);
-      if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null; }
+      stopListening();
     }
   };
 
@@ -866,7 +687,7 @@ function App() {
 
   const stopGeneration = async () => {
     // Close SSE locally
-    if (eventSourceRef.current) { eventSourceRef.current.close(); eventSourceRef.current = null; }
+    stopListening();
 
     // Mark the streaming message as stopped
     const stoppedId = streamingMsgId;
@@ -922,7 +743,6 @@ function App() {
   };
 
   const replyToQuestion = async (requestID: string, answers: string[][]) => {
-    console.log('[App] replyToQuestion called:', { requestID, answers });
     const sid = sessionIdRef.current;
     if (!sid) {
       console.error('[App] replyToQuestion: no session ID');
@@ -942,7 +762,6 @@ function App() {
     });
     
     const dir = getWorkingDir();
-    console.log('[App] replyToQuestion: sending to API:', { sessionID: sid, requestID, answers, directory: dir });
     
     try {
       const res = await fetch(`/api/question/reply`, {
@@ -950,12 +769,10 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionID: sid, requestID, answers, directory: dir })
       });
-      console.log('[App] replyToQuestion: response status:', res.status);
       
       // Check if response is JSON
       const contentType = res.headers.get('content-type');
       if (!contentType || !contentType.includes('application/json')) {
-        console.warn('[App] replyToQuestion: response is not JSON (OpenCode v1.14.18 may not support this endpoint)');
         // Question already removed optimistically, just return
         return;
       }
@@ -967,15 +784,12 @@ function App() {
         return;
       }
       const data = await res.json();
-      console.log('[App] replyToQuestion: success:', data);
     } catch (error) {
-      console.warn('[App] replyToQuestion: API call failed, but question removed optimistically:', error);
       // Don't throw - question already removed
     }
   };
 
   const rejectQuestion = async (requestID: string) => {
-    console.log('[App] rejectQuestion called:', { requestID });
     const sid = sessionIdRef.current;
     if (!sid) {
       console.error('[App] rejectQuestion: no session ID');
@@ -995,7 +809,6 @@ function App() {
     });
     
     const dir = getWorkingDir();
-    console.log('[App] rejectQuestion: sending to API:', { sessionID: sid, requestID, directory: dir });
     
     try {
       const res = await fetch(`/api/question/reject`, {
@@ -1003,12 +816,10 @@ function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ sessionID: sid, requestID, directory: dir })
       });
-      console.log('[App] rejectQuestion: response status:', res.status);
       
       // Check if response is JSON
       const contentType = res.headers.get('content-type');
       if (!contentType || !contentType.includes('application/json')) {
-        console.warn('[App] rejectQuestion: response is not JSON (OpenCode v1.14.18 may not support this endpoint)');
         // Question already removed optimistically, just return
         return;
       }
@@ -1020,9 +831,7 @@ function App() {
         return;
       }
       const data = await res.json();
-      console.log('[App] rejectQuestion: success:', data);
     } catch (error) {
-      console.warn('[App] rejectQuestion: API call failed, but question removed optimistically:', error);
       // Don't throw - question already removed
     }
   };
@@ -1046,7 +855,6 @@ function App() {
       setCmdFilter(filter);
       setShowCmdDropdown(true);
       setCmdSelectedIndex(0);
-      console.log('show dropdown:', commands.length, 'filter:', filter);
     } else {
       setShowCmdDropdown(false);
     }
