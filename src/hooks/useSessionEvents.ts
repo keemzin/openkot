@@ -2,7 +2,7 @@ import { useRef, useCallback } from 'react';
 import type { Part, QuestionRequest, PermissionRequest, Message } from '../types';
 
 interface SessionEventsOptions {
-  autopilotRef: React.MutableRefObject<boolean>;
+  sessionAutoAcceptRef: React.MutableRefObject<Record<string, boolean>>;
   getWorkingDir: () => string;
   onMessageUpdate: (updater: (prev: Message[]) => Message[]) => void;
   onPartsUpdate: (updater: (prev: Record<string, Part[]>) => Record<string, Part[]>) => void;
@@ -16,7 +16,7 @@ interface SessionEventsOptions {
 }
 
 export function useSessionEvents({
-  autopilotRef,
+  sessionAutoAcceptRef,
   getWorkingDir,
   onMessageUpdate,
   onPartsUpdate,
@@ -158,7 +158,8 @@ export function useSessionEvents({
         if (type === 'permission.asked') {
           const permission = payload?.properties as PermissionRequest;
           if (permission?.id && permission.sessionID) {
-            if (autopilotRef.current) {
+            // Check if this session has auto-accept enabled
+            if (!!sessionAutoAcceptRef.current[permission.sessionID]) {
               fetch('/api/permission/reply', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -166,12 +167,12 @@ export function useSessionEvents({
               }).catch(() => {});
             } else {
               onPermissionsUpdate(prev => {
-                const sessionPermissions = prev[permission.sessionID] ?? [];
+                const sessionPermissions = prev[permission.sessionID!] ?? [];
                 const idx = sessionPermissions.findIndex(p => p.id === permission.id);
                 const next = [...sessionPermissions];
                 if (idx >= 0) next[idx] = permission;
                 else next.push(permission);
-                return { ...prev, [permission.sessionID]: next };
+                return { ...prev, [permission.sessionID!]: next };
               });
             }
           }

@@ -83,9 +83,36 @@ function App() {
   const [selectedAgent, setSelectedAgent] = useState<'build' | 'plan'>('build');
   const [agentOpen, setAgentOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
-  const [autopilot, setAutopilot] = useState(true);
-  const autopilotRef = useRef(true);
-  useEffect(() => { autopilotRef.current = autopilot; }, [autopilot]);
+  // Per-session auto-accept (autopilot) state - matches OpenChamber pattern
+  const [sessionAutoAccept, setSessionAutoAccept] = useState<Record<string, boolean>>({});
+  const sessionAutoAcceptRef = useRef<Record<string, boolean>>({});
+  useEffect(() => { sessionAutoAcceptRef.current = sessionAutoAccept; }, [sessionAutoAccept]);
+
+  // Helper to check if current session has auto-accept enabled
+  const isCurrentSessionAutoAccept = () => {
+    if (!sessionId) return false;
+    return !!sessionAutoAccept[sessionId];
+  };
+
+  // Toggle auto-accept for current session
+  const toggleAutoAccept = () => {
+    if (!sessionId) return;
+    const next = !sessionAutoAccept[sessionId];
+    setSessionAutoAccept(prev => {
+      if (next) {
+        return { ...prev, [sessionId]: true };
+      } else {
+        const { [sessionId]: _, ...rest } = prev;
+        return rest;
+      }
+    });
+    // Notify server
+    fetch('/api/notifications/auto-accept', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sessionId, enabled: next }),
+    }).catch(() => {});
+  };
   const [permissions, setPermissions] = useState<Record<string, PermissionRequest[]>>({});
   
   // Per-session model selections (sessionId -> modelId) - persisted to localStorage
@@ -175,7 +202,7 @@ function App() {
 
   // Session events hook (extracted from App.tsx for better maintainability)
   const { listenToSession, stopListening } = useSessionEvents({
-    autopilotRef,
+    sessionAutoAcceptRef,
     getWorkingDir,
     onMessageUpdate: (updater) => setMessages(updater),
     onPartsUpdate: (updater) => setPartsMap(updater),
@@ -639,8 +666,8 @@ function App() {
         body: JSON.stringify({ 
           model: { providerID: selectedModel.providerId, modelID: selectedModel.id },
           parts: [{ type: 'text', text: finalText }],
-          agent: selectedAgent, // Send agent field to OpenCode
-          autopilot: autopilot // Send autopilot toggle to OpenCode
+          agent: selectedAgent,
+          autopilot: isCurrentSessionAutoAccept()
           }),
         
       });
@@ -1200,7 +1227,7 @@ function App() {
           ))}
 
           {/* Render pending permissions for current session */}
-          {sessionId && permissions[sessionId]?.map(p => (
+          {sessionId && permissions[sessionId]?.filter(p => !sessionAutoAccept[sessionId])?.map(p => (
             <PermissionCard key={p.id} permission={p} onReply={replyToPermission} />
           ))}
           {error && (
@@ -1289,26 +1316,26 @@ function App() {
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                 {/* Autopilot toggle */}
                 <button
-                  onClick={() => setAutopilot(!autopilot)}
-                  title={autopilot ? "Autopilot: executes tools automatically" : "Permission: asks before executing tools"}
+                  onClick={toggleAutoAccept}
+                  title={isCurrentSessionAutoAccept() ? "Autopilot: executes tools automatically" : "Permission: asks before executing tools"}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 5,
-                    background: autopilot ? 'rgba(74, 157, 95, 0.1)' : 'transparent',
-                    border: autopilot ? '1px solid rgba(74, 157, 95, 0.2)' : '1px solid var(--border-2)',
+                    background: isCurrentSessionAutoAccept() ? 'rgba(74, 157, 95, 0.1)' : 'transparent',
+                    border: isCurrentSessionAutoAccept() ? '1px solid rgba(74, 157, 95, 0.2)' : '1px solid var(--border-2)',
                     cursor: 'pointer',
                     padding: '3px 8px', borderRadius: 6,
-                    color: autopilot ? '#4a9d5f' : 'var(--text-4)',
+                    color: isCurrentSessionAutoAccept() ? '#4a9d5f' : 'var(--text-4)',
                     fontSize: 11, fontFamily: 'inherit', fontWeight: 500,
                   }}
                 >
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}>
-                    {autopilot ? (
+                    {isCurrentSessionAutoAccept() ? (
                       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                     ) : (
                       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z M12 8v4 M12 16h.01" />
                     )}
                   </svg>
-                  {autopilot ? 'Autopilot' : 'Permission'}
+                  {isCurrentSessionAutoAccept() ? 'Autopilot' : 'Permission'}
                 </button>
 
                 {/* Agent selector */}
