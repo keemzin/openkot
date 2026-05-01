@@ -158,22 +158,48 @@ export function useSessionEvents({
         if (type === 'permission.asked') {
           const permission = payload?.properties as PermissionRequest;
           if (permission?.id && permission.sessionID) {
-            // Check if this session has auto-accept enabled
-            if (!!sessionAutoAcceptRef.current[permission.sessionID]) {
+            // Check if this session has auto-accept enabled (quick check)
+            const quickCheck = !!sessionAutoAcceptRef.current[permission.sessionID];
+            console.log('permission.asked', { permissionId: permission.id, sessionID: permission.sessionID, quickCheck });
+            if (quickCheck) {
               fetch('/api/permission/reply', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sessionID: permission.sessionID, requestID: permission.id, reply: 'always', directory: getWorkingDir() }),
+                body: JSON.stringify({ sessionID: permission.sessionID, requestID: permission.id, reply: 'once', directory: getWorkingDir() }),
               }).catch(() => {});
             } else {
-              onPermissionsUpdate(prev => {
-                const sessionPermissions = prev[permission.sessionID!] ?? [];
-                const idx = sessionPermissions.findIndex(p => p.id === permission.id);
-                const next = [...sessionPermissions];
-                if (idx >= 0) next[idx] = permission;
-                else next.push(permission);
-                return { ...prev, [permission.sessionID!]: next };
-              });
+              // Slower check: ask server to check session lineage (ancestor chain)
+              fetch(`/api/sessions/${permission.sessionID}/auto-accept`)
+                .then(r => r.json())
+                .then(data => {
+                  if (data.autoAccept) {
+                    fetch('/api/permission/reply', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ sessionID: permission.sessionID, requestID: permission.id, reply: 'once', directory: getWorkingDir() }),
+                    }).catch(() => {});
+                  } else {
+                    onPermissionsUpdate(prev => {
+                      const sessionPermissions = prev[permission.sessionID!] ?? [];
+                      const idx = sessionPermissions.findIndex(p => p.id === permission.id);
+                      const next = [...sessionPermissions];
+                      if (idx >= 0) next[idx] = permission;
+                      else next.push(permission);
+                      return { ...prev, [permission.sessionID!]: next };
+                    });
+                  }
+                })
+                .catch(() => {
+                  // On error, show permission card
+                  onPermissionsUpdate(prev => {
+                    const sessionPermissions = prev[permission.sessionID!] ?? [];
+                    const idx = sessionPermissions.findIndex(p => p.id === permission.id);
+                    const next = [...sessionPermissions];
+                    if (idx >= 0) next[idx] = permission;
+                    else next.push(permission);
+                    return { ...prev, [permission.sessionID!]: next };
+                  });
+                });
             }
           }
         }

@@ -98,6 +98,7 @@ function App() {
   const toggleAutoAccept = () => {
     if (!sessionId) return;
     const next = !sessionAutoAccept[sessionId];
+    console.log('toggleAutoAccept', { sessionId, next });
     setSessionAutoAccept(prev => {
       if (next) {
         return { ...prev, [sessionId]: true };
@@ -111,7 +112,8 @@ function App() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId, enabled: next }),
-    }).catch(() => {});
+    }).then(() => console.log('auto-accept sent to server', { sessionId, enabled: next }))
+      .catch(() => {});
   };
   const [permissions, setPermissions] = useState<Record<string, PermissionRequest[]>>({});
   

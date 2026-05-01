@@ -64,6 +64,64 @@ const setAutoAcceptSession = (sessionId, enabled) => {
   }
 };
 
+// Cache for session parent IDs (for auto-accept inheritance)
+const sessionParentIdCache = new Map();
+const SESSION_PARENT_CACHE_TTL_MS = 60 * 1000;
+
+const getCachedSessionParentId = (sessionId) => {
+  const entry = sessionParentIdCache.get(sessionId);
+  if (!entry) return undefined;
+  if (Date.now() - entry.at > SESSION_PARENT_CACHE_TTL_MS) {
+    sessionParentIdCache.delete(sessionId);
+    return undefined;
+  }
+  return entry.parentID;
+};
+
+const setCachedSessionParentId = (sessionId, parentID) => {
+  sessionParentIdCache.set(sessionId, { parentID: parentID ?? null, at: Date.now() });
+};
+
+const fetchSessionParentId = async (sessionId) => {
+  if (!sessionId) return undefined;
+
+  const cached = getCachedSessionParentId(sessionId);
+  if (cached !== undefined) return cached;
+
+  try {
+    const response = await fetch(`http://${OPENCODE_HOST}:${OPENCODE_PORT}/session`, {
+      method: 'GET',
+      headers: { 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(2000),
+    });
+    if (!response.ok) return undefined;
+    const data = await response.json().catch(() => null);
+    if (!Array.isArray(data)) return undefined;
+
+    const match = data.find((session) => session && typeof session === 'object' && session.id === sessionId);
+    const parentID = match?.parentID ? match.parentID : null;
+    setCachedSessionParentId(sessionId, parentID);
+    return parentID;
+  } catch {
+    return undefined;
+  }
+};
+
+// Check if session or any ancestor has auto-accept enabled
+const isSessionAutoAccepting = async (sessionId) => {
+  if (!sessionId || autoAcceptingSessions.size === 0) return false;
+  let current = sessionId;
+  const seen = new Set();
+  while (current && !seen.has(current)) {
+    if (autoAcceptingSessions.has(current)) return true;
+    seen.add(current);
+    const parent = await fetchSessionParentId(current);
+    if (!parent) return false;
+    current = parent;
+  }
+  return false;
+};
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 const hasProcessExited = (proc) => !proc || proc.exitCode !== null || proc.signalCode !== null;
