@@ -115,7 +115,48 @@ function App() {
     }).then(() => console.log('auto-accept sent to server', { sessionId, enabled: next }))
       .catch(() => {});
   };
+  // Permissions - persisted to localStorage for recovery after refresh
+  const LS_PERMISSIONS = 'oc_permissions';
   const [permissions, setPermissions] = useState<Record<string, PermissionRequest[]>>({});
+  // Load permissions from localStorage on mount, then try API for pending ones
+  useEffect(() => {
+    const load = async () => {
+      // First, load from localStorage
+      let loaded: Record<string, PermissionRequest[]> = {};
+      try {
+        const raw = localStorage.getItem(LS_PERMISSIONS);
+        if (raw) loaded = JSON.parse(raw);
+      } catch { /* ignore */ }
+
+      // Then, try to get pending permissions from API (recovery after refresh)
+      try {
+        const dir = workingDir || '';
+        if (!dir) return;
+        const res = await fetch(`/api/permission?directory=${encodeURIComponent(dir)}`);
+        if (res.ok) {
+          const perms: any[] = await res.json();
+          if (Array.isArray(perms)) {
+            for (const p of perms) {
+              const sid = p.sessionID;
+              if (!sid) continue;
+              if (!loaded[sid]) loaded[sid] = [];
+              if (!loaded[sid].some((ep: any) => ep.id === p.id)) {
+                loaded[sid].push(p);
+              }
+            }
+          }
+        }
+      } catch { /* ignore */ }
+
+      setPermissions(loaded);
+    };
+    load();
+  }, []);
+
+  // Persist permissions to localStorage whenever they change
+  useEffect(() => {
+    localStorage.setItem(LS_PERMISSIONS, JSON.stringify(permissions));
+  }, [permissions]);
   
   // Per-session model selections (sessionId -> modelId) - persisted to localStorage
   const LS_SESSION_MODEL_SELECTIONS = 'opencode_session_model_selections';
@@ -594,7 +635,22 @@ function App() {
     if (busySessions.has(sid)) {
       listenToSession(sid, '', true);
     }
-    
+
+    // Recover pending permissions from API (in case of page refresh)
+    try {
+      const dir = getWorkingDir();
+      const res = await fetch(`/api/permission?directory=${encodeURIComponent(dir)}`);
+      if (res.ok) {
+        const perms = await res.json();
+        if (Array.isArray(perms)) {
+          const sessionPerms = perms.filter((p: any) => p.sessionID === sid);
+          if (sessionPerms.length > 0) {
+            setPermissions(prev => ({ ...prev, [sid]: sessionPerms }));
+          }
+        }
+      }
+    } catch { /* ignore */ }
+
     // Save last active session for auto-restore on refresh
     saveLastSession(workingDir, sid);
   }, [loadSessionMessages, sessionModelSelections, models, loadSessionStatus, busySessions, stopListening, listenToSession, workingDir, saveLastSession]);

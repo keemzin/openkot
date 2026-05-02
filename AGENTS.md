@@ -6,6 +6,8 @@ This project uses **Bun** (not NPM) as its primary runtime and package manager.
 
 This is a **web-based UI for OpenCode** — a chat interface that proxies requests to the OpenCode CLI binary. The architecture combines a React-based frontend with an Express proxy server:
 
+can alwYs refer here to see if there is similar impelmetation or feature to be added REFER/openchamber
+
 ```
 React Frontend (src/main.tsx)
      ↓ HTTP/WebSocket
