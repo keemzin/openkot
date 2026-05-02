@@ -12,6 +12,10 @@ import os from 'os';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
+// Import permission module (matches OpenChamber pattern)
+const permissionModule = await import('./permission.js');
+const { createPermissionRoutes, autoAcceptingSessions } = permissionModule;
+
 // ── Load .env ──────────────────────────────────────────────────────────────
 const envPath = path.join(PROJECT_ROOT, '.env');
 if (fs.existsSync(envPath)) {
@@ -52,75 +56,6 @@ let currentWorkingDir = WORKING_DIR;
 let isOpenCodeReady = false;
 let currentRestartPromise = null; // guard against concurrent restarts
 let lastOpenCodeError = null;
-
-// Sessions where the client has enabled Permission Auto-Accept (autopilot)
-const autoAcceptingSessions = new Set();
-const setAutoAcceptSession = (sessionId, enabled) => {
-  if (typeof sessionId !== 'string' || sessionId.length === 0) return;
-  if (enabled) {
-    autoAcceptingSessions.add(sessionId);
-  } else {
-    autoAcceptingSessions.delete(sessionId);
-  }
-};
-
-// Cache for session parent IDs (for auto-accept inheritance)
-const sessionParentIdCache = new Map();
-const SESSION_PARENT_CACHE_TTL_MS = 60 * 1000;
-
-const getCachedSessionParentId = (sessionId) => {
-  const entry = sessionParentIdCache.get(sessionId);
-  if (!entry) return undefined;
-  if (Date.now() - entry.at > SESSION_PARENT_CACHE_TTL_MS) {
-    sessionParentIdCache.delete(sessionId);
-    return undefined;
-  }
-  return entry.parentID;
-};
-
-const setCachedSessionParentId = (sessionId, parentID) => {
-  sessionParentIdCache.set(sessionId, { parentID: parentID ?? null, at: Date.now() });
-};
-
-const fetchSessionParentId = async (sessionId) => {
-  if (!sessionId) return undefined;
-
-  const cached = getCachedSessionParentId(sessionId);
-  if (cached !== undefined) return cached;
-
-  try {
-    const response = await fetch(`http://${OPENCODE_HOST}:${OPENCODE_PORT}/session`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json' },
-      signal: AbortSignal.timeout(2000),
-    });
-    if (!response.ok) return undefined;
-    const data = await response.json().catch(() => null);
-    if (!Array.isArray(data)) return undefined;
-
-    const match = data.find((session) => session && typeof session === 'object' && session.id === sessionId);
-    const parentID = match?.parentID ? match.parentID : null;
-    setCachedSessionParentId(sessionId, parentID);
-    return parentID;
-  } catch {
-    return undefined;
-  }
-};
-
-// Check if session or any ancestor has auto-accept enabled
-const isSessionAutoAccepting = async (sessionId) => {
-  if (!sessionId || autoAcceptingSessions.size === 0) return false;
-  let current = sessionId;
-  const seen = new Set();
-  while (current && !seen.has(current)) {
-    if (autoAcceptingSessions.has(current)) return true;
-    seen.add(current);
-    const parent = await fetchSessionParentId(current);
-    if (!parent) return false;
-    current = parent;
-  }
-  return false;
-};
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -1298,49 +1233,8 @@ async function start() {
     }
   });
 
-  // Auto-accept (autopilot) endpoint - mirror client-side state to server
-  // This allows server to suppress permission notifications for auto-accepted sessions
-  app.post('/api/notifications/auto-accept', jsonBody, (req, res) => {
-    const body = req.body && typeof req.body === 'object' ? req.body : {};
-    const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
-    const enabled = body.enabled === true;
-    if (!sessionId) {
-      return res.status(400).json({ error: 'sessionId required' });
-    }
-    setAutoAcceptSession(sessionId, enabled);
-    console.log(`[auto-accept] Session ${sessionId}: ${enabled ? 'enabled' : 'disabled'}`);
-    return res.json({ success: true, sessionId, enabled });
-  });
-
-  // Check if session (or any ancestor) has auto-accept enabled
-  app.get('/api/sessions/:id/auto-accept', async (req, res) => {
-    const sessionId = req.params.id;
-    if (!sessionId) {
-      return res.status(400).json({ error: 'sessionId required' });
-    }
-    const isAutoAccepting = await isSessionAutoAccepting(sessionId);
-    return res.json({ sessionId, autoAccept: isAutoAccepting });
-  });
-
-  // Debug endpoint to check auto-accept state
-  app.get('/api/debug/auto-accept', (req, res) => {
-    const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : null;
-    const result = {
-      autoAcceptingSessions: Array.from(autoAcceptingSessions),
-      sessionParentIdCache: Object.fromEntries(sessionParentIdCache),
-    };
-    if (sessionId) {
-      isSessionAutoAccepting(sessionId).then(accepting => {
-        result.isSessionAutoAccepting = accepting;
-        res.json(result);
-      }).catch(err => {
-        result.error = err.message;
-        res.json(result);
-      });
-    } else {
-      res.json(result);
-    }
-  });
+  // Permission routes (modular - matches OpenChamber pattern)
+  createPermissionRoutes(app, { OPENCODE_HOST, OPENCODE_PORT });
 
   // Config routes — handle locally before proxy
   const CONFIG_PATH = path.join(PROJECT_ROOT, '.opencode', 'opencode.jsonc');

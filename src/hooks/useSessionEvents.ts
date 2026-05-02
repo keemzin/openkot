@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react';
+import { useRef, useCallback, useEffect } from 'react';
 import type { Part, QuestionRequest, PermissionRequest, Message } from '../types';
 
 interface SessionEventsOptions {
@@ -29,9 +29,11 @@ export function useSessionEvents({
   onSessionIdle,
 }: SessionEventsOptions) {
   const eventSourceRef = useRef<EventSource | null>(null);
+  const currentSessionIdRef = useRef<string>('');
 
   const listenToSession = useCallback((sid: string, tempId: string, isOngoing: boolean = false) => {
     if (eventSourceRef.current) eventSourceRef.current.close();
+    currentSessionIdRef.current = sid;
     const dir = getWorkingDir();
     const es = new EventSource(`/api/event?directory=${encodeURIComponent(dir)}`);
     eventSourceRef.current = es;
@@ -61,7 +63,8 @@ export function useSessionEvents({
             const existing = base;
             const idx = existing.findIndex(p => p.id === part.id);
             const next = [...existing];
-            if (idx >= 0) next[idx] = part; else next.push(part);
+            if (idx >= 0) next[idx] = part;
+            else next.push(part);
             const updated: Record<string, Part[]> = { ...prev, [msgId]: next };
             if (msgId !== tempId) delete updated[tempId];
             return updated;
@@ -230,6 +233,22 @@ export function useSessionEvents({
       eventSourceRef.current = null;
     };
   }, [getWorkingDir]);
+
+  // Reconnect SSE on visibility change (mobile fix)
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.hidden) return;
+      // Reconnect if we have an active session but no SSE
+      if (currentSessionIdRef.current && !eventSourceRef.current) {
+        listenToSession(currentSessionIdRef.current, '', false);
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [listenToSession]);
 
   const stopListening = useCallback(() => {
     if (eventSourceRef.current) {
