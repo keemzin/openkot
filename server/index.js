@@ -241,11 +241,11 @@ async function startOpenCode(cwd) {
   const dir = cwd || currentWorkingDir;
   await killOpenCode();
   await waitForPortFree(OPENCODE_PORT, 10000);
-  currentWorkingDir = dir;
 
   try {
     await spawnOpenCode(dir);
     await waitForOpenCodeReady(20000);
+    currentWorkingDir = dir; // Only set AFTER successful start
     console.log('[OpenCode] Fully ready!');
   } catch (e) {
     console.error('[OpenCode] Start error:', e.message);

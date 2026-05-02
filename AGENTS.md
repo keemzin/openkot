@@ -70,7 +70,9 @@ OpenCode Binary (vendor/opencode/opencode.exe)
 ## API Endpoints Reference
 
 ### Permission API (Handled by Server)
+- `GET /api/permission?directory=...` — List pending permission requests from OpenCode. Used to recover permissions after page refresh.
 - `POST /api/permission/reply` — Reply to a permission request. Body: `{ sessionID, requestID, reply: "once"|"always"|"reject", directory }`. Proxied to OpenCode at `/permission/:requestID/reply`.
+- **Persistence**: Permissions are now persisted to `localStorage` (key: `oc_permissions`) and recovered on page load via API. This fixes the issue where permission cards disappear on refresh.
 
 ### MCP Config API (Handled by Server)
 - `GET /api/config/mcp` — List all MCP servers from `.opencode/opencode.jsonc`.
@@ -145,6 +147,7 @@ Use `sequential-thinking` MCP for complex, multi-step problems that require:
 - **Blank UI via CLI**: Run `bun run build` first — CLI serves `dist/` statically.
 - **Bun `WriteFailed` panic on MCP save**: Only happens when server is spawned via `openkot` CLI with `stdio: "pipe"`. Fixed by using `stdio: "inherit"` in `cli/index.ts`. Do NOT revert to piped stdio.
 - **MCP config edit works in `start.bat` but not `openkot`**: Same root cause as above — piped stdio causes Bun to crash on file writes.
+- **Restart fails sometimes**: Fixed in `server/index.js` - `currentWorkingDir` is now only set AFTER OpenCode starts successfully (line 248), not before. Previously, a failed restart would leave `currentWorkingDir` pointing to a directory but with no running OpenCode process.
 
 ## CLI (`openkot`)
 
@@ -164,3 +167,33 @@ bun link        # register openkot globally
 
 ### Entry point
 `cli/index.ts` — compiled/run directly by Bun via the `bin` field in `package.json`.
+
+## Refactoring Status
+
+### Current State
+- `src/App.tsx` is ~1,500 lines — consider extracting:
+  - **Permission logic**: Move permission state + recovery to a custom hook (`usePermissions`)
+  - **Question logic**: Extract question handling to `useQuestions` hook
+  - **Session management**: Extract `useSessionManager` hook
+  - **Trail rendering**: The "trail" logic (lines ~1170-1210) for tool grouping could be a separate component
+
+### Suggested Refactors (when needed)
+1. **Extract `usePermissions` hook**:
+   - Permission state, localStorage persistence, API recovery
+   - Clean up `src/App.tsx` by ~100 lines
+
+2. **Extract `useQuestions` hook**:
+   - Similar pattern to permissions
+   - question state + reply/reject logic
+
+3. **Extract `useSessionManager` hook**:
+   - Session CRUD, switching, status
+   - Build on existing `useSessionEvents` pattern
+
+4. **Create `PermissionCard` container**:
+   - Move recovery logic out of App.tsx
+   - Let card handle its own data fetching
+
+5. **Trail/ToolGroup improvements**:
+   - Extract trail rendering from return statement
+   - Create `<Trail>` component for tool grouping
