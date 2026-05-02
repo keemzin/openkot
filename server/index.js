@@ -1239,7 +1239,7 @@ async function start() {
   // List pending permissions from OpenCode
   app.get('/api/permission', async (req, res) => {
     try {
-      const dir = req.query.directory as string || '';
+      const dir = req.query.directory || '';
       const url = `http://${OPENCODE_HOST}:${OPENCODE_PORT}/permission${dir ? `?directory=${encodeURIComponent(dir)}` : ''}`;
       const response = await fetch(url, {
         headers: dir ? { 'x-opencode-directory': dir } : {},

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { ModelInfo } from '../../types';
 import { McpForm } from './McpForm';
 
@@ -34,6 +34,54 @@ interface SettingsDialogProps {
   onClose: () => void;
   models: ModelInfo[];
 }
+
+// Extracted outside to prevent remounting on parent re-render
+const CommandEditor = ({ command, onSave, onCancel }: { command: Command; onSave: (cmd: Command) => void; onCancel: () => void }) => {
+  const [draft, setDraft] = useState<Command>(command);
+  // Only reset draft when switching to a different command (tracked by file path)
+  const prevFileRef = useRef(command.file);
+  useEffect(() => {
+    if (command.file !== prevFileRef.current) {
+      setDraft(command);
+      prevFileRef.current = command.file;
+    }
+  }, [command.file]);
+
+  return (
+    <div style={{ padding: 12, background: 'var(--bg-2)', borderRadius: 6, marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', margin: 0 }}>Edit Command</h4>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Name</label>
+          <input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder="Command name"
+            style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Agent</label>
+          <select value={draft.agent} onChange={e => setDraft({ ...draft, agent: e.target.value })}
+            style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }}>
+            <option value="build">build</option>
+            <option value="plan">plan</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Description</label>
+        <input value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} placeholder="Brief description"
+          style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
+      </div>
+      <div>
+        <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Content (Markdown)</label>
+        <textarea value={draft.content} onChange={e => setDraft({ ...draft, content: e.target.value })} placeholder="Command implementation in Markdown"
+          rows={8} style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace' }} />
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => onSave(draft)} style={{ padding: '5px 10px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}>Save</button>
+        <button onClick={onCancel} style={{ padding: '5px 10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
+      </div>
+    </div>
+  );
+};
 
 export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
   const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'commands'>('mcp');
@@ -273,45 +321,6 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
     }
 
     onClose();
-  };
-
-  const CommandEditor = ({ command, onSave, onCancel }: { command: Command; onSave: (cmd: Command) => void; onCancel: () => void }) => {
-    const [draft, setDraft] = useState(command);
-    useEffect(() => setDraft(command), [command]);
-    return (
-      <div style={{ padding: 12, background: 'var(--bg-2)', borderRadius: 6, marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', margin: 0 }}>Edit Command</h4>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Name</label>
-            <input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder="Command name"
-              style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Agent</label>
-            <select value={draft.agent} onChange={e => setDraft({ ...draft, agent: e.target.value })}
-              style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }}>
-              <option value="build">build</option>
-              <option value="plan">plan</option>
-            </select>
-          </div>
-        </div>
-        <div>
-          <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Description</label>
-          <input value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} placeholder="Brief description"
-            style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
-        </div>
-        <div>
-          <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Content (Markdown)</label>
-          <textarea value={draft.content} onChange={e => setDraft({ ...draft, content: e.target.value })} placeholder="Command implementation in Markdown"
-            rows={8} style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace' }} />
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button onClick={() => onSave(draft)} style={{ padding: '5px 10px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}>Save</button>
-          <button onClick={onCancel} style={{ padding: '5px 10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
-        </div>
-      </div>
-    );
   };
 
   return (
