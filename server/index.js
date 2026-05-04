@@ -1102,65 +1102,8 @@ async function start() {
     res.json(results);
   });
 
-  // Permission API endpoints
-  app.post('/api/permission/reply', jsonBody, async (req, res) => {
-    try {
-      const { sessionID, requestID, reply, directory } = req.body;
-      console.log('[permission/reply] Received:', { sessionID, requestID, reply, directory });
-
-      if (!requestID || !reply) {
-        return res.status(400).json({ error: 'requestID and reply required' });
-      }
-
-      // OpenCode endpoint: /permission/:requestID/reply
-      const url = `http://${OPENCODE_HOST}:${OPENCODE_PORT}/permission/${requestID}/reply`;
-      console.log('[permission/reply] Calling:', url);
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(directory ? { 'x-opencode-directory': directory } : {})
-        },
-        body: JSON.stringify({ reply })
-      });
-
-      console.log('[permission/reply] Response status:', response.status);
-      const text = await response.text();
-
-      if (response.ok) {
-        try {
-          res.json(text ? JSON.parse(text) : { success: true });
-        } catch {
-          res.json({ success: true });
-        }
-      } else {
-        res.status(response.status).send(text);
-      }
-    } catch (error) {
-      console.error('[permission/reply] error:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
   // Permission routes (modular - matches OpenChamber pattern)
   createPermissionRoutes(app, { OPENCODE_HOST, OPENCODE_PORT });
-
-  // List pending permissions from OpenCode
-  app.get('/api/permission', async (req, res) => {
-    try {
-      const dir = req.query.directory || '';
-      const url = `http://${OPENCODE_HOST}:${OPENCODE_PORT}/permission${dir ? `?directory=${encodeURIComponent(dir)}` : ''}`;
-      const response = await fetch(url, {
-        headers: dir ? { 'x-opencode-directory': dir } : {},
-      });
-      if (!response.ok) return res.status(response.status).json({ error: 'Failed to fetch permissions' });
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      res.status(500).json({ error: error.message });
-    }
-  });
 
   // Config routes — handle locally before proxy
   const CONFIG_PATH = path.join(PROJECT_ROOT, '.opencode', 'opencode.jsonc');

@@ -181,21 +181,21 @@ export function useSessionEvents({
             console.log('permission.asked', { permissionId: permission.id, sessionID: permission.sessionID, quickCheck });
 
             if (quickCheck) {
-              fetch('/api/permission/reply', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ sessionID: permission.sessionID, requestID: permission.id, reply: 'once', directory: getWorkingDir() }),
-              }).catch(() => {});
+              getClient().then(client => client.permission.reply({
+                requestID: permission.id,
+                reply: 'once',
+                directory: getWorkingDir(),
+              })).catch(() => {});
             } else {
               fetch(`/api/sessions/${permission.sessionID}/auto-accept`)
                 .then(r => r.json())
                 .then(data => {
                   if (data.autoAccept) {
-                    fetch('/api/permission/reply', {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ sessionID: permission.sessionID, requestID: permission.id, reply: 'once', directory: getWorkingDir() }),
-                    }).catch(() => {});
+                    getClient().then(client => client.permission.reply({
+                      requestID: permission.id,
+                      reply: 'once',
+                      directory: getWorkingDir(),
+                    })).catch(() => {});
                   } else {
                     onPermissionsUpdate(prev => {
                       const existing = prev[permission.sessionID] ?? [];

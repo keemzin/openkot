@@ -133,18 +133,15 @@ function App() {
       try {
         const dir = workingDir || '';
         if (!dir) return;
-        const res = await fetch(`/api/permission?directory=${encodeURIComponent(dir)}`);
-        if (res.ok) {
-          const perms: any[] = await res.json();
-          if (Array.isArray(perms)) {
-            for (const p of perms) {
-              const sid = p.sessionID;
-              if (!sid) continue;
-              if (!loaded[sid]) loaded[sid] = [];
-              if (!loaded[sid].some((ep: any) => ep.id === p.id)) {
-                loaded[sid].push(p);
-              }
-            }
+        const client = await getClient();
+        const resp: any = await client.permission.list({ directory: dir });
+        const perms: any[] = Array.isArray(resp?.data) ? resp.data : (Array.isArray(resp) ? resp : []);
+        for (const p of perms) {
+          const sid = p.sessionID;
+          if (!sid) continue;
+          if (!loaded[sid]) loaded[sid] = [];
+          if (!loaded[sid].some((ep: any) => ep.id === p.id)) {
+            loaded[sid].push(p);
           }
         }
       } catch { /* ignore */ }
@@ -636,15 +633,12 @@ function App() {
     // Recover pending permissions from API (in case of page refresh)
     try {
       const dir = getWorkingDir();
-      const res = await fetch(`/api/permission?directory=${encodeURIComponent(dir)}`);
-      if (res.ok) {
-        const perms = await res.json();
-        if (Array.isArray(perms)) {
-          const sessionPerms = perms.filter((p: any) => p.sessionID === sid);
-          if (sessionPerms.length > 0) {
-            setPermissions(prev => ({ ...prev, [sid]: sessionPerms }));
-          }
-        }
+      const client = await getClient();
+      const resp: any = await client.permission.list({ directory: dir });
+      const perms: any[] = Array.isArray(resp?.data) ? resp.data : (Array.isArray(resp) ? resp : []);
+      const sessionPerms = perms.filter((p: any) => p.sessionID === sid);
+      if (sessionPerms.length > 0) {
+        setPermissions(prev => ({ ...prev, [sid]: sessionPerms }));
       }
     } catch { /* ignore */ }
 
@@ -814,11 +808,8 @@ function App() {
 
     const dir = getWorkingDir();
     try {
-      await fetch(`/api/permission/reply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionID: sid, requestID, reply: response, directory: dir })
-      });
+      const client = await getClient();
+      await client.permission.reply({ requestID, reply: response, directory: dir });
     } catch { /* ignore */ }
   };
 
