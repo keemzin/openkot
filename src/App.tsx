@@ -1,4 +1,5 @@
 ﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { flushSync } from 'react-dom';
 import { marked } from 'marked';
 import { TokenUsageIndicator } from './components/ui/TokenUsageIndicator';
 import { uid, getContextUsage, fallbackCopy } from './utils/helpers';
@@ -208,7 +209,7 @@ function App() {
   const [ctxPopoverOpen, setCtxPopoverOpen] = useState(false);
   const [theme, setTheme] = useState<ThemeId>(loadTheme);
   const [themePickerOpen, setThemePickerOpen] = useState(false);
-  const [revertConfirm, setRevertConfirm] = useState<{ messageId: string; affectedFiles: string[] } | null>(null);
+  const [revertConfirm, setRevertConfirm] = useState<{ messageId: string; affectedFiles: string[]; prefillText?: string } | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   const toggleTheme = () => {
@@ -502,12 +503,25 @@ function App() {
     const dir = getWorkingDir(); if (!dir) return;
     try {
       const client = await getClient();
-      const resp: any = await client.session.messages({ sessionID: sid, directory: dir });
-      const records: any[] = Array.isArray(resp?.data) ? resp.data : (Array.isArray(resp) ? resp : []);
+
+      // Messages are required — load first
+      const messagesResp: any = await client.session.messages({ sessionID: sid, directory: dir });
+
+      // Session info is optional — only needed for revert boundary, don't block on failure
+      let revertMsgID: string | null = null;
+      try {
+        const sessionResp: any = await client.session.get({ sessionID: sid, directory: dir });
+        const sessionData = sessionResp?.data ?? sessionResp;
+        revertMsgID = sessionData?.revert?.messageID ?? null;
+      } catch { /* not critical — messages still load without revert boundary */ }
+
+      const records: any[] = Array.isArray(messagesResp?.data) ? messagesResp.data : (Array.isArray(messagesResp) ? messagesResp : []);
       const msgs: Message[] = [];
       const pm: Record<string, Part[]> = {};
       for (const rec of records) {
         if (!rec?.info?.id) continue;
+        // Stop at the revert boundary — don't show reverted messages
+        if (revertMsgID && rec.info.id === revertMsgID) break;
         msgs.push({ id: rec.info.id, role: rec.info.role, content: '', tokens: rec.info.tokens });
         pm[rec.info.id] = rec.parts ?? [];
       }
@@ -559,17 +573,28 @@ function App() {
         const toolName = (p.tool as string) || p.type;
         const isFileWrite = toolName === 'write' || toolName === 'edit' || toolName === 'patch';
         if (isFileWrite) {
-          // File path lives inside state.input (same as ToolPart.tsx reads it)
           const input = (p.state as any)?.input ?? p.input ?? {};
           const filePath = (input as any).filePath ?? (input as any).file_path ?? (input as any).path;
           if (filePath) fileSet.add(filePath);
         }
       }
     }
-    setRevertConfirm({ messageId, affectedFiles: Array.from(fileSet) });
+
+    // Find the user message that preceded this assistant message — prefill it after revert
+    const msgIdx = messages.findIndex(m => m.id === messageId);
+    let prefillText: string | undefined;
+    if (msgIdx > 0) {
+      const prevMsg = messages[msgIdx - 1];
+      if (prevMsg?.role === 'user') {
+        const userParts = partsMap[prevMsg.id] ?? [];
+        prefillText = userParts.filter(p => p.type === 'text').map(p => p.text ?? '').join('').trim() || undefined;
+      }
+    }
+
+    setRevertConfirm({ messageId, affectedFiles: Array.from(fileSet), prefillText });
   }, [messages, partsMap]);
 
-  const doRevert = useCallback(async (messageId: string) => {
+  const doRevert = useCallback(async (messageId: string, prefillText?: string) => {
     const sid = sessionIdRef.current;
     if (!sid) return;
     const dir = getWorkingDir();
@@ -591,9 +616,19 @@ function App() {
     try {
       const client = await getClient();
       await client.session.revert({ sessionID: sid, directory: dir, messageID: messageId });
-      // Reload messages after revert — OpenCode may have updated the session state
       await loadSessionMessages(sid);
     } catch { /* ignore — optimistic state already applied */ }
+
+    // Prefill after everything settles — flushSync forces React to update the
+    // DOM synchronously so we can focus the textarea immediately after
+    if (prefillText) {
+      flushSync(() => setInputText(prefillText));
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.focus();
+        ta.setSelectionRange(ta.value.length, ta.value.length);
+      }
+    }
   }, [messages, loadSessionMessages]);
 
   const switchSession = useCallback(async (sid: string) => {
@@ -1434,7 +1469,7 @@ function App() {
                 padding: '7px 16px', borderRadius: 7, border: '1px solid var(--border)', background: 'transparent',
                 color: 'var(--text-3)', cursor: 'pointer', fontSize: 13,
               }}>Cancel</button>
-              <button onClick={() => { const id = revertConfirm.messageId; setRevertConfirm(null); doRevert(id); }} style={{
+              <button onClick={() => { const id = revertConfirm.messageId; const prefill = revertConfirm.prefillText; setRevertConfirm(null); doRevert(id, prefill); }} style={{
                 padding: '7px 16px', borderRadius: 7, border: 'none', background: 'var(--red, #e06c75)',
                 color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 600,
               }}>Revert</button>

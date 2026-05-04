@@ -85,6 +85,7 @@ const client = await getClient();
 | Rename session | `client.session.update({ sessionID, directory, title })` |
 | Session status | `client.session.status({ directory })` |
 | Load messages | `client.session.messages({ sessionID, directory })` |
+| Get session info | `client.session.get({ sessionID, directory })` |
 | Send message | `client.session.promptAsync({ sessionID, directory, model: { providerID, modelID }, parts, agent })` |
 | Fork session | `client.session.fork({ sessionID, directory, messageID })` |
 | Revert session | `client.session.revert({ sessionID, directory, messageID })` |
