@@ -51,25 +51,29 @@ export function useSessionEvents({
 
     // Fire-and-forget async loop — errors are handled inside
     (async () => {
-      try {
-        const client = await getClient();
-        // Check abort after each async operation — stopListening() may have
-        // been called while getClient() or client.global.event() was awaiting
-        if (abort.signal.aborted) return;
+      let reconnectDelay = 500; // start fast
+      let failCount = 0;
+      const MAX_RECONNECT_DELAY = 10000;
 
-        const result = await client.global.event();
-        if (abort.signal.aborted) {
-          // Stream opened but we were already aborted — close it immediately
-          result.stream.return(undefined);
-          return;
-        }
-        const gen = result.stream;
+      while (!abort.signal.aborted) {
+        try {
+          const client = await getClient();
+          if (abort.signal.aborted) return;
 
-        // Stop the generator when aborted
-        abort.signal.addEventListener('abort', () => gen.return(undefined), { once: true });
+          const result = await client.global.event();
+          if (abort.signal.aborted) {
+            result.stream.return(undefined);
+            return;
+          }
+          const gen = result.stream;
+          abort.signal.addEventListener('abort', () => gen.return(undefined), { once: true });
 
-        for await (const globalEvent of gen) {
-          if (abort.signal.aborted) break;
+          // Reset reconnect delay on successful connection
+          reconnectDelay = 500;
+          failCount = 0;
+
+          for await (const globalEvent of gen) {
+            if (abort.signal.aborted) break;
 
           // v2 wraps events in { directory, payload }
           const event = (globalEvent as any)?.payload ?? globalEvent;
@@ -319,14 +323,34 @@ export function useSessionEvents({
             continue;
           }
         }
+
+        // Stream ended without session.idle — unexpected disconnect
+        // Wait and reconnect unless aborted
+        if (!abort.signal.aborted) {
+          failCount++;
+          console.warn(`[useSessionEvents] stream ended unexpectedly (attempt ${failCount}), reconnecting in ${reconnectDelay}ms...`);
+          // Only show error to user after 2+ failures — brief drops are silent
+          if (failCount >= 2) onError(`Connection lost. Reconnecting...`);
+          await new Promise(r => setTimeout(r, reconnectDelay));
+          if (failCount >= 2) onError(null);
+          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+        }
+
       } catch (err: any) {
         if (err?.name === 'AbortError' || abort.signal.aborted) return;
         console.error('[useSessionEvents] stream error:', err);
-        onLoading(false);
-        onStreamingMsgId(null);
-        onBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
-        abortRef.current = null;
+        // Wait and retry on error
+        if (!abort.signal.aborted) {
+          failCount++;
+          if (failCount >= 2) {
+            onError(`Connection error. Reconnecting in ${reconnectDelay / 1000}s...`);
+          }
+          await new Promise(r => setTimeout(r, reconnectDelay));
+          if (failCount >= 2) onError(null);
+          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+        }
       }
+      } // end while
     })();
 
   }, [getWorkingDir]);
