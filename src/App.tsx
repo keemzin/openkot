@@ -3,6 +3,7 @@ import { marked } from 'marked';
 import { TokenUsageIndicator } from './components/ui/TokenUsageIndicator';
 import { uid, getContextUsage, fallbackCopy } from './utils/helpers';
 import { useSessionEvents } from './hooks/useSessionEvents';
+import { getClient } from './lib/opencode';
 import { MobileTerminal } from './components/terminal/MobileTerminal';
 import { DesktopTerminal } from './components/terminal/DesktopTerminal';
 import { ChatMessage } from './components/chat/ChatMessage';
@@ -361,11 +362,11 @@ function App() {
         // Preload session counts sequentially (NOT parallel) to avoid flooding the server
         (async () => {
           const map: Record<string, SessionInfo[]> = {};
+          const client = await getClient();
           for (const dir of merged) {
             try {
-              const r = await fetch(`/api/session?directory=${encodeURIComponent(dir)}`);
-              if (!r.ok) continue;
-              const data = await r.json();
+              const resp: any = await client.session.list({ directory: dir });
+              const data = resp?.data ?? resp;
               const list: SessionInfo[] = (Array.isArray(data) ? data : []).map((s: any) => ({
                 id: s.id, title: s.title, time: { created: s.time?.created, updated: s.time?.updated },
               }));
@@ -377,25 +378,35 @@ function App() {
         })();
 
         // Fetch commands and models
-        fetch('/api/command').then(r => r.json()).then((cmds: any[]) => {
-          setCommands(cmds.map(c => ({ name: c.name, description: c.description, template: c.template })));
+        getClient().then(client => client.command.list({ directory: _workingDir })).then((resp: any) => {
+          // v2 SDK returns { data: { value: [...], Count: N } } or { value: [...] }
+          const body = resp?.data ?? resp;
+          const arr: any[] = Array.isArray(body) ? body : (body?.value ?? []);
+          setCommands(arr.map((c: any) => ({ name: c.name, description: c.description, template: c.template })));
         }).catch(() => {});
-        // Load models ” wait for workingDir so opencode is ready before hitting /api/provider
-        fetch('/api/provider').then(r => r.json()).then(data => {
-          const connected = new Set(data.connected);
-          const defaults = data.default ?? {};
+        // Load models — wait for workingDir so opencode is ready before hitting provider list
+        getClient().then(client => client.provider.list({ directory: _workingDir })).then((resp: any) => {
+          // v2 SDK: response is { data: { all, connected, default } } OR unwrapped { all, connected, default }
+          const data = resp?.data ?? resp;
+          const providers: any[] = data?.all ?? [];
+          const connectedSet = new Set<string>(Array.isArray(data?.connected) ? data.connected : []);
+          const defaults = data?.default ?? {};
           const list: ModelInfo[] = [];
-          for (const provider of data.all) {
-            if (!connected.has(provider.id)) continue;
-            for (const model of Object.values(provider.models) as any[]) {
-              const isDefault = defaults[provider.id] === model.id;
-              const isFree = (model.cost?.input ?? 1) === 0 && (model.cost?.output ?? 1) === 0;
-              list.push({ id: model.id, name: model.name || model.id, providerId: provider.id, providerName: provider.name || provider.id, isDefault, isFree, contextLimit: model.limit?.context });
+          for (const provider of providers) {
+            if (!connectedSet.has(provider.id)) continue;
+            const providerModels = provider.models ?? {};
+            for (const [modelKey, model] of Object.entries(providerModels) as [string, any][]) {
+              // model.id may be set, or fall back to the object key
+              const modelId = model?.id ?? modelKey;
+              if (!modelId) continue;
+              const isDefault = defaults[provider.id] === modelId;
+              const isFree = (model?.cost?.input ?? 1) === 0 && (model?.cost?.output ?? 1) === 0;
+              list.push({ id: modelId, name: model?.name || modelId, providerId: provider.id, providerName: provider.name || provider.id, isDefault, isFree, contextLimit: model?.limit?.context });
             }
           }
           list.sort((a, b) => { if (a.isFree !== b.isFree) return a.isFree ? -1 : 1; if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1; return a.name.localeCompare(b.name); });
           setModels(list); setSelectedModel(list[0] ?? null);
-        }).catch(() => {});
+        }).catch((err: any) => { console.error('[provider.list] error:', err); });
       });
     }).catch(() => {});
   }, []);
@@ -403,49 +414,38 @@ function App() {
   const loadSessionStatus = useCallback(async () => {
     const dir = getWorkingDir(); if (!dir) return;
     try {
-      const statusRes = await fetch(`/api/session/status?directory=${encodeURIComponent(dir)}`);
-      if (statusRes.ok) {
-        const statusData = await statusRes.json();
-        const busySet = new Set<string>();
-        let currentSessionBusy = false;
-
-        for (const [sid, status] of Object.entries(statusData) as [string, any][]) {
-          // Status is { type: 'idle' | 'busy' | 'retry', ... }
-          const isBusy = status?.type === 'busy';
-          if (isBusy) {
-            busySet.add(sid);
-            if (sid === sessionId) currentSessionBusy = true;
-          }
-        }
-
-        setBusySessions(busySet);
-        // If current session is busy, set loading state to show stop button
-        if (currentSessionBusy && !isLoading) {
-          setIsLoading(true);
-        } else if (!currentSessionBusy && isLoading) {
-          // Only clear loading if we're sure it's not busy (but don't clear if we're currently sending)
-          setIsLoading(false);
+      const client = await getClient();
+      const resp: any = await client.session.status({ directory: dir });
+      const statusData = resp?.data ?? resp;
+      const busySet = new Set<string>();
+      let currentSessionBusy = false;
+      for (const [sid, status] of Object.entries(statusData as any) as [string, any][]) {
+        const isBusy = status?.type === 'busy';
+        if (isBusy) {
+          busySet.add(sid);
+          if (sid === sessionId) currentSessionBusy = true;
         }
       }
+      setBusySessions(busySet);
+      if (currentSessionBusy && !isLoading) setIsLoading(true);
+      else if (!currentSessionBusy && isLoading) setIsLoading(false);
     } catch {}
   }, [sessionId, isLoading]);
 
   const loadSessions = useCallback(async () => {
     const dir = getWorkingDir(); if (!dir) return;
     try {
-      const r = await fetch(`/api/session?directory=${encodeURIComponent(dir)}`);
-      if (!r.ok) return;
-      const data = await r.json();
+      const client = await getClient();
+      const resp: any = await client.session.list({ directory: dir });
+      const data = resp?.data ?? resp;
       const list: SessionInfo[] = (Array.isArray(data) ? data : []).map((s: any) => ({
         id: s.id,
         title: s.title,
         time: { created: s.time?.created, updated: s.time?.updated },
-        parentID: s.parentID ?? null // Include parentID for sub-sessions
+        parentID: s.parentID ?? null,
       }));
       list.sort((a, b) => (b.time?.updated ?? 0) - (a.time?.updated ?? 0));
       setSessions(list);
-
-      // Also load status
       await loadSessionStatus();
     } catch {}
   }, [loadSessionStatus]);
@@ -504,9 +504,9 @@ function App() {
   const loadSessionMessages = useCallback(async (sid: string) => {
     const dir = getWorkingDir(); if (!dir) return;
     try {
-      const r = await fetch(`/api/session/${encodeURIComponent(sid)}/message?directory=${encodeURIComponent(dir)}`);
-      if (!r.ok) return;
-      const records: MessageRecord[] = await r.json();
+      const client = await getClient();
+      const resp: any = await client.session.messages({ sessionID: sid, directory: dir });
+      const records: any[] = Array.isArray(resp?.data) ? resp.data : (Array.isArray(resp) ? resp : []);
       const msgs: Message[] = [];
       const pm: Record<string, Part[]> = {};
       for (const rec of records) {
@@ -520,19 +520,15 @@ function App() {
 
   const renameSession = useCallback(async (id: string, title: string) => {
     const dir = getWorkingDir();
-    await fetch(`/api/session/${encodeURIComponent(id)}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-opencode-directory': dir },
-      body: JSON.stringify({ title }),
-    }).catch(() => {});
+    const client = await getClient();
+    await client.session.update({ sessionID: id, directory: dir, title }).catch(() => {});
     await loadSessions();
   }, [loadSessions]);
 
   const deleteSession = useCallback(async (id: string) => {
     const dir = getWorkingDir();
-    await fetch(`/api/session/${encodeURIComponent(id)}?directory=${encodeURIComponent(dir)}`, {
-      method: 'DELETE',
-    }).catch(() => {});
+    const client = await getClient();
+    await client.session.delete({ sessionID: id, directory: dir }).catch(() => {});
     if (sessionId === id) { setSessionId(null); setMessages([]); setPartsMap({}); }
     await loadSessions();
   }, [loadSessions, sessionId]);
@@ -542,23 +538,15 @@ function App() {
     if (!sid) return;
     const dir = getWorkingDir();
     try {
-      const r = await fetch(
-        `/api/session/${encodeURIComponent(sid)}/fork?directory=${encodeURIComponent(dir)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messageID: messageId }),
-        }
-      );
-      if (!r.ok) return;
-      const forked = await r.json();
-      if (forked?.id) {
+      const client = await getClient();
+      const forked: any = await client.session.fork({ sessionID: sid, directory: dir, messageID: messageId });
+      const forkedData = forked?.data ?? forked;
+      if (forkedData?.id) {
         await loadSessions();
-        // Switch to the forked session
         stopListening();
         setIsLoading(false); setError(null); setStreamingMsgId(null);
-        setSessionId(forked.id); setMessages([]); setPartsMap({});
-        await loadSessionMessages(forked.id);
+        setSessionId(forkedData.id); setMessages([]); setPartsMap({});
+        await loadSessionMessages(forkedData.id);
       }
     } catch { /* ignore */ }
   }, [loadSessions, loadSessionMessages]);
@@ -588,13 +576,11 @@ function App() {
     const sid = sessionIdRef.current;
     if (!sid) return;
     const dir = getWorkingDir();
-    // Optimistically remove messages at and after the revert point — do NOT reload after
     setMessages(prev => {
       const idx = prev.findIndex(m => m.id === messageId);
       return idx >= 0 ? prev.slice(0, idx) : prev;
     });
     setPartsMap(prev => {
-      // Remove parts for messages at/after revert point
       const keepIds = new Set(messages.slice(0, messages.findIndex(m => m.id === messageId)).map(m => m.id));
       const next: Record<string, Part[]> = {};
       for (const k of Object.keys(prev)) {
@@ -603,15 +589,8 @@ function App() {
       return next;
     });
     try {
-      await fetch(
-        `/api/session/${encodeURIComponent(sid)}/revert?directory=${encodeURIComponent(dir)}`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ messageID: messageId }),
-        }
-      );
-      // Don't reload — keep optimistic state. Server marks them reverted but still returns them.
+      const client = await getClient();
+      await client.session.revert({ sessionID: sid, directory: dir, messageID: messageId });
     } catch { /* ignore — optimistic state already applied */ }
   }, [messages, loadSessionMessages]);
 
@@ -629,10 +608,28 @@ function App() {
     }
 
     await loadSessionMessages(sid);
-    // Check if this session is busy
-    await loadSessionStatus();
-    // If this session is busy, listen for ongoing updates
-    if (busySessions.has(sid)) {
+
+    // Check session status directly — don't rely on stale busySessions state
+    let isBusy = false;
+    try {
+      const dir = getWorkingDir();
+      const client = await getClient();
+      const resp: any = await client.session.status({ directory: dir });
+      const statusData = resp?.data ?? resp;
+      const sessionStatus = statusData?.[sid];
+      isBusy = sessionStatus?.type === 'busy';
+
+      // Update global busy state too
+      const busySet = new Set<string>();
+      for (const [id, status] of Object.entries(statusData ?? {}) as [string, any][]) {
+        if (status?.type === 'busy') busySet.add(id);
+      }
+      setBusySessions(busySet);
+      if (isBusy) setIsLoading(true);
+    } catch {}
+
+    // If busy, start listening for ongoing stream updates
+    if (isBusy) {
       listenToSession(sid, '', true);
     }
 
@@ -653,7 +650,7 @@ function App() {
 
     // Save last active session for auto-restore on refresh
     saveLastSession(workingDir, sid);
-  }, [loadSessionMessages, sessionModelSelections, models, loadSessionStatus, busySessions, stopListening, listenToSession, workingDir, saveLastSession]);
+  }, [loadSessionMessages, sessionModelSelections, models, stopListening, listenToSession, workingDir, saveLastSession]);
 
   const newSession = useCallback(() => {
     stopListening();
@@ -662,19 +659,14 @@ function App() {
   }, [stopListening]);
 
   const getOrCreateSession = useCallback(async (): Promise<string> => {
-    // Use ref to always get the latest sessionId, not a stale closure value
     const currentSessionId = sessionIdRef.current;
     if (currentSessionId) return currentSessionId;
     const dir = getWorkingDir();
-    // Pass directory as query param so the proxy can read it (body isn't parsed for proxied routes)
-    const r = await fetch(`/api/session?directory=${encodeURIComponent(dir)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ directory: dir }),
-    });
-    if (!r.ok) { const t = await r.text().catch(() => ''); throw new Error(`Session error: ${r.status}${t ? ` - ${t}` : ''}`); }
-    const s = await r.json();
-    setSessionId(s.id); await loadSessions(); return s.id;
+    const client = await getClient();
+    const s: any = await client.session.create({ directory: dir });
+    const sData = s?.data ?? s;
+    if (!sData?.id) throw new Error('Session create returned no id');
+    setSessionId(sData.id); await loadSessions(); return sData.id;
   }, [loadSessions]);
 
 
@@ -717,22 +709,29 @@ function App() {
 
     try {
       const sid = await getOrCreateSession();
-      listenToSession(sid, tempAssistantId);
       const dir = getWorkingDir();
-      const r = await fetch(`/api/session/${encodeURIComponent(sid)}/prompt_async?directory=${encodeURIComponent(dir)}`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          model: { providerID: selectedModel.providerId, modelID: selectedModel.id },
-          parts: [{ type: 'text', text: finalText }],
-          agent: selectedAgent,
-          autopilot: isCurrentSessionAutoAccept()
-          }),
-        
+      const client = await getClient();
+      const resp: any = await client.session.promptAsync({
+        sessionID: sid,
+        directory: dir,
+        model: { providerID: selectedModel.providerId, modelID: selectedModel.id },
+        parts: [{ type: 'text', text: finalText }],
+        agent: selectedAgent,
       });
-      if (!r.ok) { const d = await r.text().catch(() => ''); throw new Error(`Prompt error: ${r.status}${d ? ` - ${d}` : ''}`); }
-    } catch (err) {
+      // v2 SDK wraps errors in the response body instead of throwing
+      const respData = resp?.data ?? resp;
+      if (respData?.error) {
+        throw new Error(respData.error?.data?.message ?? respData.error?.message ?? String(respData.error));
+      }
+      // Only start listening after confirming the prompt was accepted
+      listenToSession(sid, tempAssistantId);
+    } catch (err: any) {
+      const msg = err?.data?.message ?? err?.message ?? 'Failed to send message';
+      console.error('[sendMessage] error:', err);
+      setError(msg);
       setMessages(prev => prev.filter(m => m.id !== tempAssistantId && m.id !== tempUserMsgId));
-      setIsLoading(false); setStreamingMsgId(null);
+      setIsLoading(false);
+      setStreamingMsgId(null);
       stopListening();
     }
   };
@@ -793,9 +792,7 @@ function App() {
     const sid = sessionIdRef.current;
     if (sid) {
       const dir = getWorkingDir();
-      fetch(`/api/session/${encodeURIComponent(sid)}/abort?directory=${encodeURIComponent(dir)}`, {
-        method: 'POST',
-      }).catch(() => {});
+      getClient().then(client => client.session.abort({ sessionID: sid, directory: dir })).catch(() => {});
     }
   };
 

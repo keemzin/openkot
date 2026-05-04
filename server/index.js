@@ -33,7 +33,7 @@ if (fs.existsSync(envPath)) {
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const PORT          = parseInt(process.env.PORT          || '3000', 10);
-const OPENCODE_PORT = parseInt(process.env.OPENCODE_PORT || '4088', 10);
+const OPENCODE_PORT = parseInt(process.env.OPENCODE_PORT || '3358', 10);
 const OPENCODE_HOST = process.env.OPENCODE_HOST || '127.0.0.1';
 
 // Binary path — default to local vendor binary, override via env
@@ -162,7 +162,7 @@ async function spawnOpenCode(dir) {
   console.log(`[OpenCode] Binary: ${VENDOR_OPENCODE}`);
 
   const proc = Bun.spawn({
-    cmd: [VENDOR_OPENCODE, 'serve', '--port', String(OPENCODE_PORT), '--hostname', OPENCODE_HOST],
+    cmd: [VENDOR_OPENCODE, 'serve', '--port', String(OPENCODE_PORT), '--hostname', OPENCODE_HOST, '--cors', `http://localhost:${PORT}`, '--cors', `http://127.0.0.1:${PORT}`, '--cors', 'http://localhost:5173', '--cors', 'http://127.0.0.1:5173'],
     cwd: dir,
     stdout: 'pipe',
     stderr: 'pipe',
@@ -320,7 +320,7 @@ async function start() {
   });
   // Expose server config to the frontend before the proxy
   app.get('/config', (_req, res) => {
-    res.json({ workingDir: currentWorkingDir, rootDir: WORKING_DIR });
+    res.json({ workingDir: currentWorkingDir, rootDir: WORKING_DIR, opencodePort: OPENCODE_PORT, opencodeHost: OPENCODE_HOST });
   });
 
   const jsonBody = express.json();

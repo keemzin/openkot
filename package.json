@@ -28,6 +28,7 @@
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.41.1",
     "@lezer/common": "^1.5.2",
+    "@opencode-ai/sdk": "^1.14.33",
     "@types/marked": "^6.0.0",
     "@types/prismjs": "^1.26.6",
     "@xterm/addon-fit": "^0.11.0",
