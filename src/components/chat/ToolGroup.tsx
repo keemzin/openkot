@@ -3,6 +3,7 @@ import type { Part } from '../../types';
 import { getToolDisplayName, getToolIconPath, getToolDescription } from '../../utils/toolPresentation';
 import { isDiffTool } from '../../utils/toolCategorization';
 import { ToolPart } from './ToolPart';
+import { Markdown } from './Markdown';
 
 function ToolIcon({ toolName }: { toolName: string }) {
   const d = getToolIconPath(toolName);
@@ -49,11 +50,11 @@ function JustificationRow({ text, defaultOpen }: { text: string; defaultOpen?: b
           </svg>
         </span>
       </div>
-      {open && (
-        <div style={{ paddingLeft: 20, paddingBottom: 6, fontSize: '0.8rem', color: 'var(--text-3)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-          {text.trim()}
-        </div>
-      )}
+       {open && (
+         <div style={{ paddingLeft: 20, paddingBottom: 6 }}>
+           <Markdown text={text.trim()} />
+         </div>
+       )}
     </div>
   );
 }

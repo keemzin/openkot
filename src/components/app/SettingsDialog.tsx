@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { ModelInfo } from '../../types';
 import { McpForm } from './McpForm';
+import { usePreferencesStore } from '../../stores/preferencesStore';
 
 interface McpServer {
   name: string;
@@ -35,8 +36,57 @@ interface SettingsDialogProps {
   models: ModelInfo[];
 }
 
+// Extracted outside to prevent remounting on parent re-render
+const CommandEditor = ({ command, onSave, onCancel }: { command: Command; onSave: (cmd: Command) => void; onCancel: () => void }) => {
+  const [draft, setDraft] = useState<Command>(command);
+  // Only reset draft when switching to a different command (tracked by file path)
+  const prevFileRef = useRef(command.file);
+  useEffect(() => {
+    if (command.file !== prevFileRef.current) {
+      setDraft(command);
+      prevFileRef.current = command.file;
+    }
+  }, [command.file]);
+
+  return (
+    <div style={{ padding: 12, background: 'var(--bg-2)', borderRadius: 6, marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', margin: 0 }}>Edit Command</h4>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Name</label>
+          <input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder="Command name"
+            style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
+        </div>
+        <div style={{ flex: 1 }}>
+          <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Agent</label>
+          <select value={draft.agent} onChange={e => setDraft({ ...draft, agent: e.target.value })}
+            style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }}>
+            <option value="build">build</option>
+            <option value="plan">plan</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Description</label>
+        <input value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} placeholder="Brief description"
+          style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
+      </div>
+      <div>
+        <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Content (Markdown)</label>
+        <textarea value={draft.content} onChange={e => setDraft({ ...draft, content: e.target.value })} placeholder="Command implementation in Markdown"
+          rows={8} style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace' }} />
+      </div>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => onSave(draft)} style={{ padding: '5px 10px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}>Save</button>
+        <button onClick={onCancel} style={{ padding: '5px 10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
+      </div>
+    </div>
+  );
+};
+
 export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
-  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'commands'>('mcp');
+  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'commands' | 'appearance'>('mcp');
+  const { streamingMode, setStreamingMode } = usePreferencesStore();
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingMcp, setEditingMcp] = useState<McpServer | null>(null);
@@ -275,45 +325,6 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
     onClose();
   };
 
-  const CommandEditor = ({ command, onSave, onCancel }: { command: Command; onSave: (cmd: Command) => void; onCancel: () => void }) => {
-    const [draft, setDraft] = useState(command);
-    useEffect(() => setDraft(command), [command]);
-    return (
-      <div style={{ padding: 12, background: 'var(--bg-2)', borderRadius: 6, marginBottom: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', margin: 0 }}>Edit Command</h4>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Name</label>
-            <input value={draft.name} onChange={e => setDraft({ ...draft, name: e.target.value })} placeholder="Command name"
-              style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
-          </div>
-          <div style={{ flex: 1 }}>
-            <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Agent</label>
-            <select value={draft.agent} onChange={e => setDraft({ ...draft, agent: e.target.value })}
-              style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }}>
-              <option value="build">build</option>
-              <option value="plan">plan</option>
-            </select>
-          </div>
-        </div>
-        <div>
-          <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Description</label>
-          <input value={draft.description} onChange={e => setDraft({ ...draft, description: e.target.value })} placeholder="Brief description"
-            style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
-        </div>
-        <div>
-          <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Content (Markdown)</label>
-          <textarea value={draft.content} onChange={e => setDraft({ ...draft, content: e.target.value })} placeholder="Command implementation in Markdown"
-            rows={8} style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace' }} />
-        </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <button onClick={() => onSave(draft)} style={{ padding: '5px 10px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}>Save</button>
-          <button onClick={onCancel} style={{ padding: '5px 10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
-        </div>
-      </div>
-    );
-  };
-
   return (
     <>
       <div
@@ -377,6 +388,18 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
               borderLeft: !isMobile && selectedPage === 'commands' ? '2px solid var(--accent)' : 'none',
               borderBottom: isMobile && selectedPage === 'commands' ? '2px solid var(--accent)' : 'none'
             }}>Commands</button>
+            <button onClick={() => setSelectedPage('appearance')} style={{
+              width: isMobile ? 'auto' : '100%',
+              padding: isMobile ? '8px 12px' : '8px 16px',
+              background: selectedPage === 'appearance' ? 'var(--bg-2)' : 'transparent',
+              border: 'none',
+              color: 'var(--text)',
+              fontSize: 14,
+              cursor: 'pointer',
+              textAlign: 'left',
+              borderLeft: !isMobile && selectedPage === 'appearance' ? '2px solid var(--accent)' : 'none',
+              borderBottom: isMobile && selectedPage === 'appearance' ? '2px solid var(--accent)' : 'none'
+            }}>Appearance</button>
           </div>
           <div style={{ flex: 1, padding: isMobile ? '16px' : '20px', overflowY: 'auto' }}>
             {selectedPage === 'mcp' && (
@@ -732,6 +755,50 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
             </button>
             {restartStatus === 'error' && restartError && (
               <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 300 }}>{restartError}</span>
+            )}
+
+            {selectedPage === 'appearance' && (
+              <div>
+                <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 16 }}>Appearance</h3>
+
+                {/* Streaming mode toggle */}
+                <div style={{ padding: '14px 16px', background: 'var(--bg-2)', borderRadius: 6, border: '1px solid var(--border)', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 3 }}>True Streaming</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>
+                        Show text as it arrives token by token. When off, text appears in larger chunks with full Markdown formatting during generation.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setStreamingMode(!streamingMode)}
+                      style={{
+                        flexShrink: 0,
+                        width: 44, height: 24, borderRadius: 12,
+                        background: streamingMode ? 'var(--accent)' : 'var(--bg-4)',
+                        border: '1px solid var(--border-2)',
+                        cursor: 'pointer', position: 'relative', transition: 'background 0.2s',
+                        padding: 0,
+                      }}
+                      title={streamingMode ? 'Disable streaming' : 'Enable streaming'}
+                    >
+                      <span style={{
+                        position: 'absolute', top: 2,
+                        left: streamingMode ? 22 : 2,
+                        width: 18, height: 18, borderRadius: '50%',
+                        background: 'white',
+                        transition: 'left 0.2s',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                      }} />
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-4)' }}>
+                    {streamingMode
+                      ? '✓ Streaming on — text renders as plain text while generating, switches to Markdown when done'
+                      : '○ Streaming off — Markdown rendered on each chunk update'}
+                  </div>
+                </div>
+              </div>
             )}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>

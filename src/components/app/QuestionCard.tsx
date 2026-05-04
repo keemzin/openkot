@@ -1,11 +1,21 @@
-import { useState } from 'react';
-import type { QuestionRequest } from '../../types';
+﻿import React, { useState } from 'react';
 
-interface QuestionCardProps {
+export type QuestionRequest = {
+  id: string;
+  sessionID: string;
+  questions: Array<{
+    question: string;
+    header?: string;
+    multiple?: boolean;
+    options: Array<{ label: string; description?: string }>;
+  }>;
+};
+
+type QuestionCardProps = {
   question: QuestionRequest;
   onReply: (requestID: string, answers: string[][]) => Promise<void>;
   onReject: (requestID: string) => Promise<void>;
-}
+};
 
 export function QuestionCard({ question, onReply, onReject }: QuestionCardProps) {
   const [activeTab, setActiveTab] = useState(0);
@@ -25,9 +35,9 @@ export function QuestionCard({ question, onReply, onReject }: QuestionCardProps)
       if (isMultiple) {
         const exists = current.includes(label);
         const next = exists ? current.filter(item => item !== label) : [...current, label];
-        return { ...prev, [qIdx]: next };
+            return { ...prev, [qIdx]: next };
       }
-      return { ...prev, [qIdx]: [label] };
+        return { ...prev, [qIdx]: [label] };
     });
   };
 
@@ -65,10 +75,9 @@ export function QuestionCard({ question, onReply, onReject }: QuestionCardProps)
     setIsResponding(true);
     try {
       const answers = buildAnswers();
-      await onReply(question.id, answers);
-    } catch (e) {
-      console.error('[QuestionCard] reply error:', e);
-    } finally {
+        await onReply(question.id, answers);
+      } catch (e) {
+      } finally {
       setIsResponding(false);
     }
   };
@@ -77,9 +86,8 @@ export function QuestionCard({ question, onReply, onReject }: QuestionCardProps)
     setIsResponding(true);
     try {
       await onReject(question.id);
-    } catch (e) {
-      console.error('[QuestionCard] reject error:', e);
-    } finally {
+      } catch (e) {
+      } finally {
       setIsResponding(false);
     }
   };
@@ -100,7 +108,7 @@ export function QuestionCard({ question, onReply, onReject }: QuestionCardProps)
   return (
     <div style={{ border: '1px solid #edb449', borderRadius: 8, padding: 12, marginBottom: 8, background: 'var(--bg-2)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#edb449' }}>⚡ Input needed</span>
+        <span style={{ fontSize: 14, fontWeight: 600, color: '#edb449' }}> Input needed</span>
         {questions.length > 1 && (
           <div style={{ display: 'flex', gap: 4, marginLeft: 'auto' }}>
             {questions.map((q, idx) => (
@@ -148,7 +156,12 @@ export function QuestionCard({ question, onReply, onReject }: QuestionCardProps)
               }}
             >
               <div style={{ display: 'flex', alignItems: 'start', gap: 8 }}>
-                <input type="checkbox" checked={selected} readOnly style={{ marginTop: 2 }} />
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  readOnly
+                  style={{ marginTop: 2 }}
+                />
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: selected ? 500 : 400 }}>{option.label}</div>
                   {option.description && (
@@ -174,7 +187,7 @@ export function QuestionCard({ question, onReply, onReject }: QuestionCardProps)
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ fontSize: 13 }}>✏️ Other…</span>
+            <span style={{ fontSize: 13 }}>Other</span>
           </div>
         </button>
 
@@ -211,29 +224,38 @@ export function QuestionCard({ question, onReply, onReject }: QuestionCardProps)
             fontWeight: 500,
             border: 'none',
             borderRadius: 4,
-            background: canSubmit ? '#edb449' : 'var(--bg-4)',
-            color: canSubmit ? '#000' : 'var(--text-3)',
-            cursor: canSubmit ? 'pointer' : 'not-allowed',
+            background: '#4a9d5f',
+            color: '#fff',
+            cursor: isResponding ? 'not-allowed' : 'pointer',
             opacity: isResponding ? 0.6 : 1
           }}
         >
-          {canSubmit ? 'Confirm' : 'Next'}
+          {canSubmit ? 'Submit' : 'Next'}
         </button>
+
         <button
           onClick={handleDismiss}
           disabled={isResponding}
           style={{
             padding: '6px 12px',
             fontSize: 13,
+            fontWeight: 500,
             border: 'none',
             borderRadius: 4,
-            background: 'transparent',
-            color: 'var(--text-4)',
-            cursor: isResponding ? 'not-allowed' : 'pointer'
+            background: '#d9534f',
+            color: '#fff',
+            cursor: isResponding ? 'not-allowed' : 'pointer',
+            opacity: isResponding ? 0.6 : 1
           }}
         >
-          Cancel
+          ✕ Dismiss
         </button>
+
+        {isResponding && (
+          <div style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-3)' }}>
+            Sending...
+          </div>
+        )}
       </div>
     </div>
   );

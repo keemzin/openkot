@@ -9,6 +9,13 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    define: {
+      // The OpenCode SDK uses Node.js globals — polyfill for browser builds
+      'process.env': {},
+      'process.platform': JSON.stringify('browser'),
+      'process.version': JSON.stringify(''),
+      'global': 'globalThis',
+    },
     optimizeDeps: {
       exclude: ['REFER'],
       entries: ['src/**/*.{ts,tsx}'],

@@ -1,10 +1,16 @@
-import { useState } from 'react';
-import type { PermissionRequest } from '../../types';
+import React, { useState } from 'react';
 
-interface PermissionCardProps {
+export type PermissionRequest = {
+  id: string;
+  sessionID: string;
+  permission: string;
+  metadata?: Record<string, any>;
+};
+
+type PermissionCardProps = {
   permission: PermissionRequest;
   onReply: (requestID: string, response: 'once' | 'always' | 'reject') => Promise<void>;
-}
+};
 
 export function PermissionCard({ permission, onReply }: PermissionCardProps) {
   const [isResponding, setIsResponding] = useState(false);
@@ -20,6 +26,7 @@ export function PermissionCard({ permission, onReply }: PermissionCardProps) {
   const tool = permission.permission.toLowerCase();
   const meta = permission.metadata || {};
   
+  // Simplified rendering for opencode-gui
   const renderContent = () => {
     if (tool === 'bash' || tool === 'shell' || tool === 'cmd') {
       const cmd = meta.command || meta.cmd || meta.script;
@@ -29,6 +36,11 @@ export function PermissionCard({ permission, onReply }: PermissionCardProps) {
       const path = meta.path || meta.file_path || meta.filePath;
       return <div style={{ fontSize: 12, color: 'var(--text-3)' }}>File: <code style={{ color: 'var(--accent)' }}>{path}</code></div>;
     }
+    if (tool === 'read' || tool === 'readfile') {
+      const path = meta.path || meta.file_path || meta.filePath || meta.filename;
+      if (path) return <div style={{ fontSize: 12, color: 'var(--text-3)' }}>File: <code style={{ color: 'var(--accent)' }}>{path}</code></div>;
+    }
+    if (Object.keys(meta).length === 0) return null;
     return <pre style={{ fontSize: 11, padding: 6, background: 'var(--bg-1)', borderRadius: 4 }}>{JSON.stringify(meta, null, 2)}</pre>;
   };
 

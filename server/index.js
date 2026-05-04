@@ -1,4 +1,4 @@
-import express from 'express';
+﻿import express from 'express';
 import { createServer } from 'http';
 import { createConnection } from 'net';
 import { createProxyMiddleware } from 'http-proxy-middleware';
@@ -11,6 +11,10 @@ import os from 'os';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
+
+// Import permission module (matches OpenChamber pattern)
+const permissionModule = await import('./permission.js');
+const { createPermissionRoutes, autoAcceptingSessions } = permissionModule;
 
 // ── Load .env ──────────────────────────────────────────────────────────────
 const envPath = path.join(PROJECT_ROOT, '.env');
@@ -29,7 +33,7 @@ if (fs.existsSync(envPath)) {
 
 // ── Config ─────────────────────────────────────────────────────────────────
 const PORT          = parseInt(process.env.PORT          || '3000', 10);
-const OPENCODE_PORT = parseInt(process.env.OPENCODE_PORT || '4088', 10);
+const OPENCODE_PORT = parseInt(process.env.OPENCODE_PORT || '3358', 10);
 const OPENCODE_HOST = process.env.OPENCODE_HOST || '127.0.0.1';
 
 // Binary path — default to local vendor binary, override via env
@@ -237,11 +241,11 @@ async function startOpenCode(cwd) {
   const dir = cwd || currentWorkingDir;
   await killOpenCode();
   await waitForPortFree(OPENCODE_PORT, 10000);
-  currentWorkingDir = dir;
 
   try {
     await spawnOpenCode(dir);
     await waitForOpenCodeReady(20000);
+    currentWorkingDir = dir; // Only set AFTER successful start
     console.log('[OpenCode] Fully ready!');
   } catch (e) {
     console.error('[OpenCode] Start error:', e.message);
@@ -316,7 +320,7 @@ async function start() {
   });
   // Expose server config to the frontend before the proxy
   app.get('/config', (_req, res) => {
-    res.json({ workingDir: currentWorkingDir, rootDir: WORKING_DIR });
+    res.json({ workingDir: currentWorkingDir, rootDir: WORKING_DIR, opencodePort: OPENCODE_PORT, opencodeHost: OPENCODE_HOST });
   });
 
   const jsonBody = express.json();
@@ -1098,136 +1102,8 @@ async function start() {
     res.json(results);
   });
 
-  // Question API endpoints - call OpenCode with correct path format
-  // OpenCode expects: POST /question/:requestID/reply with body { answers: [[...]] }
-  app.post('/api/question/reply', jsonBody, async (req, res) => {
-    try {
-      const { sessionID, requestID, answers, directory } = req.body;
-      console.log('[question/reply] Received:', { sessionID, requestID, answers, directory });
-      
-      if (!requestID || !answers) {
-        return res.status(400).json({ error: 'Missing requestID or answers' });
-      }
-      
-      // OpenCode endpoint: /question/:requestID/reply
-      const url = `http://${OPENCODE_HOST}:${OPENCODE_PORT}/question/${requestID}/reply`;
-      console.log('[question/reply] Calling:', url);
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...(directory ? { 'x-opencode-directory': directory } : {})
-        },
-        body: JSON.stringify({ answers })
-      });
-      
-      console.log('[question/reply] Response status:', response.status);
-      const text = await response.text();
-      console.log('[question/reply] Response:', text.substring(0, 500));
-      
-      if (response.ok) {
-        try {
-          const data = JSON.parse(text);
-          return res.json(data);
-        } catch {
-          // Return success even if response isn't JSON
-          return res.json({ success: true });
-        }
-      } else {
-        console.error('[question/reply] Error response:', text);
-        return res.status(response.status).json({ error: text });
-      }
-    } catch (error) {
-      console.error('[question/reply] error:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  app.post('/api/question/reject', jsonBody, async (req, res) => {
-    try {
-      const { sessionID, requestID, directory } = req.body;
-      console.log('[question/reject] Received:', { sessionID, requestID, directory });
-      
-      if (!requestID) {
-        return res.status(400).json({ error: 'Missing requestID' });
-      }
-      
-      // OpenCode endpoint: /question/:requestID/reject
-      const url = `http://${OPENCODE_HOST}:${OPENCODE_PORT}/question/${requestID}/reject`;
-      console.log('[question/reject] Calling:', url);
-      
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          ...(directory ? { 'x-opencode-directory': directory } : {})
-        },
-        body: JSON.stringify({})
-      });
-      
-      console.log('[question/reject] Response status:', response.status);
-      const text = await response.text();
-      console.log('[question/reject] Response:', text.substring(0, 500));
-      
-      if (response.ok) {
-        try {
-          const data = JSON.parse(text);
-          return res.json(data);
-        } catch {
-          // Return success even if response isn't JSON
-          return res.json({ success: true });
-        }
-      } else {
-        console.error('[question/reject] Error response:', text);
-        return res.status(response.status).json({ error: text });
-      }
-    } catch (error) {
-      console.error('[question/reject] error:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
-
-  // Permission API endpoints
-  app.post('/api/permission/reply', jsonBody, async (req, res) => {
-    try {
-      const { sessionID, requestID, reply, directory } = req.body;
-      console.log('[permission/reply] Received:', { sessionID, requestID, reply, directory });
-
-      if (!requestID || !reply) {
-        return res.status(400).json({ error: 'requestID and reply required' });
-      }
-
-      // OpenCode endpoint: /permission/:requestID/reply
-      const url = `http://${OPENCODE_HOST}:${OPENCODE_PORT}/permission/${requestID}/reply`;
-      console.log('[permission/reply] Calling:', url);
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(directory ? { 'x-opencode-directory': directory } : {})
-        },
-        body: JSON.stringify({ reply })
-      });
-
-      console.log('[permission/reply] Response status:', response.status);
-      const text = await response.text();
-
-      if (response.ok) {
-        try {
-          res.json(text ? JSON.parse(text) : { success: true });
-        } catch {
-          res.json({ success: true });
-        }
-      } else {
-        res.status(response.status).send(text);
-      }
-    } catch (error) {
-      console.error('[permission/reply] error:', error);
-      res.status(500).json({ error: error.message });
-    }
-  });
+  // Permission routes (modular - matches OpenChamber pattern)
+  createPermissionRoutes(app, { OPENCODE_HOST, OPENCODE_PORT });
 
   // Config routes — handle locally before proxy
   const CONFIG_PATH = path.join(PROJECT_ROOT, '.opencode', 'opencode.jsonc');

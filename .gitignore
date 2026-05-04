@@ -16,3 +16,4 @@ WORKSPACE/
 vendor
 .opencode/opencode.jsonc
 script/
+Quick-save/
