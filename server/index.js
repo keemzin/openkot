@@ -292,7 +292,7 @@ function setupProxy(app) {
     target: `http://${OPENCODE_HOST}:${OPENCODE_PORT}`,
     changeOrigin: true,
     pathRewrite: { '^/api': '' },
-    pathFilter: (path) => !path.startsWith('/api/terminal'),
+    pathFilter: (path) => !path.startsWith('/api/terminal') && !path.startsWith('/api/notifications') && !path.startsWith('/api/sessions'),
     on: {
       proxyReq: (proxyReq, req) => {
         if (req.opencodeDirectory) {
@@ -1103,7 +1103,8 @@ async function start() {
   });
 
   // Permission routes (modular - matches OpenChamber pattern)
-  createPermissionRoutes(app, { OPENCODE_HOST, OPENCODE_PORT });
+  // Must be registered AFTER setupProxy so they aren't intercepted by the proxy
+  // createPermissionRoutes is called below after setupProxy(app)
 
   // Config routes — handle locally before proxy
   const CONFIG_PATH = path.join(PROJECT_ROOT, '.opencode', 'opencode.jsonc');
@@ -1447,6 +1448,9 @@ ${content}`;
   // Body parsing is only needed for routes that don't go through the proxy.
 
   setupProxy(app);
+
+  // Permission routes — registered after proxy but pathFilter excludes them
+  createPermissionRoutes(app, { OPENCODE_HOST, OPENCODE_PORT });
 
   // Serve built frontend in production (when dist/ exists)
   const distPath = path.join(PROJECT_ROOT, 'dist');

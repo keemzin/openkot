@@ -74,8 +74,10 @@ const isSessionAutoAccepting = async (sessionId, fetchFn) => {
 
 // Create routes for permission auto-accept
 const createPermissionRoutes = (app, { OPENCODE_HOST, OPENCODE_PORT }) => {
+  const jsonBody = require('express').json();
+
   // Auto-accept (autopilot) endpoint - mirror client-side state to server
-  app.post('/api/notifications/auto-accept', (req, res) => {
+  app.post('/api/notifications/auto-accept', jsonBody, (req, res) => {
     const body = req.body && typeof req.body === 'object' ? req.body : {};
     const sessionId = typeof body.sessionId === 'string' ? body.sessionId.trim() : '';
     const enabled = body.enabled === true;

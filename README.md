@@ -18,6 +18,7 @@ A web-based UI for [OpenCode](https://opencode.ai) — run it locally, use it fr
 - **Git Panel** — Stage, commit, push, pull, diff
 - **Themes** — Flexoki, Tokyo Night, Nord, Catppuccin, Dracula, Solarized (dark/light)
 - **Permission Mode** — Approve AI tool calls before execution
+- **MCP Integration** — Context7 docs, Sequential Thinking, Chrome DevTools, and more
 - **`openkot` CLI** — Start the UI from any directory globally
 
 
@@ -159,6 +160,8 @@ bun run server         # Express server only
 
 ## Configuration
 
+### Environment (`.env`)
+
 Edit `.env` in the project root:
 
 ```env
@@ -170,19 +173,29 @@ WORKING_DIR=WORKSPACE  # Default working directory (relative or absolute)
 
 The CLI overrides these with its own port allocation, so `.env` only matters for `bun run server` / `bun run dev`.
 
+### OpenCode Config (`.opencode/opencode.jsonc`)
+
+Configure permissions, MCP servers, and providers in `.opencode/opencode.jsonc`. A starter template is available at `.opencode/opencode .jsonc.example` — copy and rename it to get started.
+
+Key sections:
+- **permission** — Control which tools require approval (edit, bash, read, etc.)
+- **mcp** — Enable MCP servers (Context7, Sequential Thinking, Chrome DevTools, etc.)
+- **provider** — Configure AI model providers
+
 ---
 
 ## Architecture
 
 ```
-openkot CLI (cli/index.ts)
-    ↓ spawns
-Express Server (server/index.js)
-    ├── Serves dist/ (built React app)
-    ├── Spawns OpenCode binary internally
-    ├── Proxies /api/* → OpenCode
-    └── Direct handlers: /api/fs/*, /api/git/*, /api/terminal/*, /api/config/*
+React Frontend (src/main.tsx)
+     ↓ SDK (direct, port 3358)              ↓ HTTP/WebSocket (via Express)
+OpenCode Binary (vendor/opencode)        Express Server (server/index.js)
+     ├── Serves dist/ (built React app)
+     ├── Spawns OpenCode binary internally
+     └── Direct handlers: /api/fs/*, /api/git/*, /api/terminal/*, /api/config/*
 ```
+
+OpenCode-specific operations (sessions, messages, permissions, questions) use the SDK to connect directly to the OpenCode binary. Filesystem, git, terminal, and MCP config operations stay as Express routes.
 
 ---
 
@@ -205,3 +218,9 @@ Run `bun run build` — the server needs `dist/` to exist.
 
 **MCP config edits crash the server**  
 Only happens if you start with a custom script that pipes stdout. Always use `openkot` or `start.bat`.
+
+**MCP servers failing to start**  
+Check `.opencode/opencode.jsonc` — ensure `enabled: true` and commands are valid. Check logs for npm/npx errors.
+
+**Chrome DevTools MCP**  
+Requires Chrome to be running with remote debugging. Start Chrome with `--remote-debugging-port=9222` flag.

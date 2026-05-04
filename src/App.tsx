@@ -86,36 +86,41 @@ function App() {
   const [agentOpen, setAgentOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
   // Per-session auto-accept (autopilot) state - matches OpenChamber pattern
+  // '__pending__' key holds the default for new sessions before they get an ID
+  const PENDING_SESSION_KEY = '__pending__';
   const [sessionAutoAccept, setSessionAutoAccept] = useState<Record<string, boolean>>({});
   const sessionAutoAcceptRef = useRef<Record<string, boolean>>({});
   useEffect(() => { sessionAutoAcceptRef.current = sessionAutoAccept; }, [sessionAutoAccept]);
 
   // Helper to check if current session has auto-accept enabled
+  // Falls back to pending state when no session exists yet
   const isCurrentSessionAutoAccept = () => {
-    if (!sessionId) return false;
-    return !!sessionAutoAccept[sessionId];
+    if (sessionId) return !!sessionAutoAccept[sessionId];
+    return !!sessionAutoAccept[PENDING_SESSION_KEY];
   };
 
-  // Toggle auto-accept for current session
+  // Toggle auto-accept for current session (or pending state for new sessions)
   const toggleAutoAccept = () => {
-    if (!sessionId) return;
-    const next = !sessionAutoAccept[sessionId];
-    console.log('toggleAutoAccept', { sessionId, next });
+    const key = sessionId ?? PENDING_SESSION_KEY;
+    const next = !sessionAutoAccept[key];
+    console.log('toggleAutoAccept', { sessionId: key, next });
     setSessionAutoAccept(prev => {
       if (next) {
-        return { ...prev, [sessionId]: true };
+        return { ...prev, [key]: true };
       } else {
-        const { [sessionId]: _, ...rest } = prev;
+        const { [key]: _, ...rest } = prev;
         return rest;
       }
     });
-    // Notify server
-    fetch('/api/notifications/auto-accept', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, enabled: next }),
-    }).then(() => console.log('auto-accept sent to server', { sessionId, enabled: next }))
-      .catch(() => {});
+    // Only notify server if we have a real session ID
+    if (sessionId) {
+      fetch('/api/notifications/auto-accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, enabled: next }),
+      }).then(() => console.log('auto-accept sent to server', { sessionId, enabled: next }))
+        .catch(() => {});
+    }
   };
   // Permissions - persisted to localStorage for recovery after refresh
   const LS_PERMISSIONS = 'oc_permissions';
@@ -700,7 +705,22 @@ function App() {
     const s: any = await client.session.create({ directory: dir });
     const sData = s?.data ?? s;
     if (!sData?.id) throw new Error('Session create returned no id');
-    setSessionId(sData.id); await loadSessions(); return sData.id;
+    const newId = sData.id;
+
+    // Transfer pending autopilot state to the real session ID
+    setSessionAutoAccept(prev => {
+      if (!prev[PENDING_SESSION_KEY]) return prev;
+      const { [PENDING_SESSION_KEY]: pending, ...rest } = prev;
+      // Notify server with the real session ID
+      fetch('/api/notifications/auto-accept', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: newId, enabled: true }),
+      }).catch(() => {});
+      return { ...rest, [newId]: true };
+    });
+
+    setSessionId(newId); await loadSessions(); return newId;
   }, [loadSessions]);
 
 
