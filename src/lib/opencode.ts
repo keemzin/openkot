@@ -1,12 +1,13 @@
 /**
  * OpenCode SDK v2 client singleton.
  *
- * Connects directly to the OpenCode binary (bypassing the Express proxy).
- * The port is read from /config at startup — the server exposes it so the
- * frontend always uses the correct port even when the CLI picks a free one.
+ * Routes through the Express proxy at /api — same host and port the browser
+ * used to reach the app. This works from any device (localhost, mobile via IP,
+ * etc.) because Express is always reachable and forwards to OpenCode internally.
  *
- * Every SDK call passes { directory } explicitly, which is the v2 equivalent
- * of the proxy's x-opencode-directory header injection.
+ * The Express proxy injects x-opencode-directory on every request, so we don't
+ * need to pass { directory } separately — but we still do for SDK calls that
+ * need it explicitly.
  */
 import { createOpencodeClient } from '@opencode-ai/sdk/v2/client';
 import type { OpencodeClient } from '@opencode-ai/sdk/v2/client';
@@ -14,44 +15,33 @@ import type { OpencodeClient } from '@opencode-ai/sdk/v2/client';
 export type { OpencodeClient };
 
 let _client: OpencodeClient | null = null;
-let _initPromise: Promise<OpencodeClient> | null = null;
 
 /**
- * Initialise and cache the SDK client.
- * Reads opencodePort from /config so it works with dynamic port assignment.
- * Safe to call multiple times — only initialises once.
+ * Returns a cached SDK client routed through the Express proxy.
+ * Uses window.location.origin so it works from any device on any network.
  */
-export async function getClient(): Promise<OpencodeClient> {
+export function getClientSync(): OpencodeClient {
   if (_client) return _client;
-  if (_initPromise) return _initPromise;
 
-  _initPromise = (async () => {
-    let opencodePort = 3358; // default from .env
+  // Route through Express proxy — always reachable regardless of network topology.
+  // Express strips /api and forwards to OpenCode, so the SDK sees the right endpoints.
+  const base = typeof window !== 'undefined'
+    ? `${window.location.origin}/api`
+    : 'http://localhost:3006/api';
 
-    try {
-      const res = await fetch('/config');
-      if (res.ok) {
-        const cfg = await res.json();
-        if (cfg.opencodePort) opencodePort = Number(cfg.opencodePort);
-      }
-    } catch {
-      console.warn('[opencode] /config unreachable, using default port', opencodePort);
-    }
-
-    // Always connect to 127.0.0.1 from the browser — the bind host (0.0.0.0)
-    // is the server-side listen address, not the client-side connect address.
-    const baseUrl = `http://127.0.0.1:${opencodePort}`;
-    console.log('[opencode] SDK connecting to', baseUrl);
-
-    _client = createOpencodeClient({ baseUrl });
-    return _client;
-  })();
-
-  return _initPromise;
+  console.log('[opencode] SDK connecting via proxy to', base);
+  _client = createOpencodeClient({ baseUrl: base });
+  return _client;
 }
 
-/** Reset the singleton — call after a server restart on a new port. */
+/**
+ * Async version for compatibility with existing call sites.
+ */
+export async function getClient(): Promise<OpencodeClient> {
+  return getClientSync();
+}
+
+/** Reset the singleton (e.g. after a server restart). */
 export function resetClient(): void {
   _client = null;
-  _initPromise = null;
 }

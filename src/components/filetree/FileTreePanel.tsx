@@ -215,10 +215,10 @@ export function FileTreePanel({ workingDir }: FileTreePanelProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, position: 'relative' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 2, padding: '5px 8px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-        <button onClick={() => setTab('files')} style={{ ...ib, fontSize: 11, padding: '3px 8px', color: tab === 'files' ? 'var(--text)' : 'var(--text-4)', background: tab === 'files' ? 'var(--bg-4)' : 'transparent' }}>Files</button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 8px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+        <button onClick={() => setTab('files')} style={{ ...ib, fontSize: 12, padding: '6px 14px', minHeight: 32, borderRadius: 6, color: tab === 'files' ? 'var(--text)' : 'var(--text-4)', background: tab === 'files' ? 'var(--bg-4)' : 'transparent', fontWeight: tab === 'files' ? 600 : 400 }}>Files</button>
         {openTabs.length > 0 && (
-          <button onClick={() => setTab('viewer')} style={{ ...ib, fontSize: 11, padding: '3px 8px', color: tab === 'viewer' ? 'var(--text)' : 'var(--text-4)', background: tab === 'viewer' ? 'var(--bg-4)' : 'transparent' }}>View</button>
+          <button onClick={() => setTab('viewer')} style={{ ...ib, fontSize: 12, padding: '6px 14px', minHeight: 32, borderRadius: 6, color: tab === 'viewer' ? 'var(--text)' : 'var(--text-4)', background: tab === 'viewer' ? 'var(--bg-4)' : 'transparent', fontWeight: tab === 'viewer' ? 600 : 400 }}>View</button>
         )}
         <div style={{ flex: 1 }} />
         <button onClick={() => setInlineEdit({ parentPath: workingDir, type: 'newFile' })} title="New file" style={ib}>

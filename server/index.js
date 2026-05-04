@@ -162,7 +162,7 @@ async function spawnOpenCode(dir) {
   console.log(`[OpenCode] Binary: ${VENDOR_OPENCODE}`);
 
   const proc = Bun.spawn({
-    cmd: [VENDOR_OPENCODE, 'serve', '--port', String(OPENCODE_PORT), '--hostname', OPENCODE_HOST, '--cors', `http://localhost:${PORT}`, '--cors', `http://127.0.0.1:${PORT}`, '--cors', 'http://localhost:5173', '--cors', 'http://127.0.0.1:5173'],
+    cmd: [VENDOR_OPENCODE, 'serve', '--port', String(OPENCODE_PORT), '--hostname', OPENCODE_HOST],
     cwd: dir,
     stdout: 'pipe',
     stderr: 'pipe',
