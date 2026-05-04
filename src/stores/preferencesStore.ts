@@ -19,6 +19,13 @@ export type MonoFontId = typeof MONO_FONTS[number]['id'];
 
 const LS_UI_FONT = 'oc_ui_font';
 const LS_MONO_FONT = 'oc_mono_font';
+const LS_STREAMING_MODE = 'oc_streaming_mode';
+
+export function loadStreamingMode(): boolean {
+  if (typeof window === 'undefined') return true;
+  const v = localStorage.getItem(LS_STREAMING_MODE);
+  return v === null ? true : v === 'true'; // default on
+}
 
 export function loadUiFont(): UiFontId {
   if (typeof window === 'undefined') return 'inter';
@@ -45,22 +52,30 @@ export function applyFonts(ui: UiFontId, mono: MonoFontId) {
 interface PreferencesState {
   uiFont: UiFontId;
   monoFont: MonoFontId;
+  streamingMode: boolean;
   setUiFont: (id: UiFontId) => void;
   setMonoFont: (id: MonoFontId) => void;
+  setStreamingMode: (enabled: boolean) => void;
 }
 
 export const usePreferencesStore = create<PreferencesState>((set) => ({
   uiFont: loadUiFont(),
   monoFont: loadMonoFont(),
-  
+  streamingMode: loadStreamingMode(),
+
   setUiFont: (id) => {
     applyFonts(id, loadMonoFont());
     set({ uiFont: id });
   },
-  
+
   setMonoFont: (id) => {
     applyFonts(loadUiFont(), id);
     set({ monoFont: id });
+  },
+
+  setStreamingMode: (enabled) => {
+    localStorage.setItem(LS_STREAMING_MODE, String(enabled));
+    set({ streamingMode: enabled });
   },
 }));
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import type { ModelInfo } from '../../types';
 import { McpForm } from './McpForm';
+import { usePreferencesStore } from '../../stores/preferencesStore';
 
 interface McpServer {
   name: string;
@@ -84,7 +85,8 @@ const CommandEditor = ({ command, onSave, onCancel }: { command: Command; onSave
 };
 
 export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
-  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'commands'>('mcp');
+  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'commands' | 'appearance'>('mcp');
+  const { streamingMode, setStreamingMode } = usePreferencesStore();
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(true);
   const [editingMcp, setEditingMcp] = useState<McpServer | null>(null);
@@ -386,6 +388,18 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
               borderLeft: !isMobile && selectedPage === 'commands' ? '2px solid var(--accent)' : 'none',
               borderBottom: isMobile && selectedPage === 'commands' ? '2px solid var(--accent)' : 'none'
             }}>Commands</button>
+            <button onClick={() => setSelectedPage('appearance')} style={{
+              width: isMobile ? 'auto' : '100%',
+              padding: isMobile ? '8px 12px' : '8px 16px',
+              background: selectedPage === 'appearance' ? 'var(--bg-2)' : 'transparent',
+              border: 'none',
+              color: 'var(--text)',
+              fontSize: 14,
+              cursor: 'pointer',
+              textAlign: 'left',
+              borderLeft: !isMobile && selectedPage === 'appearance' ? '2px solid var(--accent)' : 'none',
+              borderBottom: isMobile && selectedPage === 'appearance' ? '2px solid var(--accent)' : 'none'
+            }}>Appearance</button>
           </div>
           <div style={{ flex: 1, padding: isMobile ? '16px' : '20px', overflowY: 'auto' }}>
             {selectedPage === 'mcp' && (
@@ -741,6 +755,50 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
             </button>
             {restartStatus === 'error' && restartError && (
               <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 300 }}>{restartError}</span>
+            )}
+
+            {selectedPage === 'appearance' && (
+              <div>
+                <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 16 }}>Appearance</h3>
+
+                {/* Streaming mode toggle */}
+                <div style={{ padding: '14px 16px', background: 'var(--bg-2)', borderRadius: 6, border: '1px solid var(--border)', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 16 }}>
+                    <div>
+                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 3 }}>True Streaming</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5 }}>
+                        Show text as it arrives token by token. When off, text appears in larger chunks with full Markdown formatting during generation.
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setStreamingMode(!streamingMode)}
+                      style={{
+                        flexShrink: 0,
+                        width: 44, height: 24, borderRadius: 12,
+                        background: streamingMode ? 'var(--accent)' : 'var(--bg-4)',
+                        border: '1px solid var(--border-2)',
+                        cursor: 'pointer', position: 'relative', transition: 'background 0.2s',
+                        padding: 0,
+                      }}
+                      title={streamingMode ? 'Disable streaming' : 'Enable streaming'}
+                    >
+                      <span style={{
+                        position: 'absolute', top: 2,
+                        left: streamingMode ? 22 : 2,
+                        width: 18, height: 18, borderRadius: '50%',
+                        background: 'white',
+                        transition: 'left 0.2s',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.2)',
+                      }} />
+                    </button>
+                  </div>
+                  <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-4)' }}>
+                    {streamingMode
+                      ? '✓ Streaming on — text renders as plain text while generating, switches to Markdown when done'
+                      : '○ Streaming off — Markdown rendered on each chunk update'}
+                  </div>
+                </div>
+              </div>
             )}
           </div>
           <div style={{ display: 'flex', gap: 8 }}>

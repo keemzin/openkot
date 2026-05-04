@@ -3,6 +3,7 @@ import type { Message, Part } from '../../types';
 import { fallbackCopy } from '../../utils/helpers';
 import { Markdown } from './Markdown';
 import { ToolGroup } from './ToolGroup';
+import { usePreferencesStore } from '../../stores/preferencesStore';
 
 export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStreaming, onFork, onRevert, hideTools }: {
   msg: Message; parts?: Part[]; isStreaming?: boolean;
@@ -13,6 +14,7 @@ export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStrea
   const isUser = msg.role === 'user';
   const [copied, setCopied] = useState(false);
   const [saved, setSaved] = useState(false);
+  const streamingMode = usePreferencesStore(s => s.streamingMode);
 
   const textContent = parts
     ? parts.filter(p => p.type === 'text').map(p => p.text ?? '').join('')
@@ -169,7 +171,12 @@ export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStrea
               wordBreak: 'break-word',
             }}>
               {hasContent
-                ? <Markdown text={textContent} />
+                ? (isStreaming && streamingMode
+                    // During streaming: plain pre-wrap text — no Markdown parsing overhead
+                    ? <span style={{ whiteSpace: 'pre-wrap' }}>{textContent}</span>
+                    // Done or streaming mode off: full Markdown render
+                    : <Markdown text={textContent} />
+                  )
                 : <span style={{ color: 'var(--text-4)', fontStyle: 'italic' }}>Thinking…</span>
               }
             </div>

@@ -83,6 +83,34 @@ export function useSessionEvents({
             p?.sessionID;
           if (evtSid && evtSid !== sid) continue;
 
+          // ── message.part.delta (true streaming — append delta to part text) ──
+          if (type === 'message.part.delta') {
+            const { messageID, partID, field, delta } = p as {
+              messageID: string; partID: string; field: string; delta: string;
+            };
+            if (field !== 'text' || !delta || !messageID || !partID) continue;
+
+            onStreamingMsgId(messageID);
+            onPartsUpdate(prev => {
+              const existing = prev[messageID] ?? [];
+              const idx = existing.findIndex(pp => pp.id === partID);
+              if (idx >= 0) {
+                // Append delta to existing text part
+                const part = existing[idx];
+                const next = [...existing];
+                next[idx] = { ...part, text: ((part.text as string) ?? '') + delta };
+                return { ...prev, [messageID]: next };
+              } else {
+                // New part — create it with the delta as initial text
+                return {
+                  ...prev,
+                  [messageID]: [...existing, { id: partID, type: 'text', text: delta, messageID, sessionID: evtSid ?? '' } as any],
+                };
+              }
+            });
+            continue;
+          }
+
           // ── message.part.updated ───────────────────────────────────────
           if (type === 'message.part.updated') {
             const part = p.part as Part;
