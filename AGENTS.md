@@ -10,21 +10,23 @@ Can always refer here to see if there is similar implementation or feature to be
 
 ```
 React Frontend (src/main.tsx)
-     ↓ SDK (direct, port 3358)          ↓ HTTP/WebSocket (via Express proxy)
-OpenCode Binary (vendor/opencode)    Express Server (server/index.js)
-                                          ↓ Direct handlers for:
-                                          /api/fs/*, /api/git/*,
-                                          /api/terminal/*, /api/question/*,
-                                          /api/permission/*, /api/config/*,
-                                          /health, /config, /restart, /switch-dir
+     ↓ SDK (direct, port 3358)              ↓ HTTP/WebSocket (via Express proxy)
+OpenCode Binary (vendor/opencode)        Express Server (server/index.js)
+                                              ↓ Direct handlers for:
+                                              /api/fs/*, /api/git/*,
+                                              /api/terminal/*,
+                                              /api/config/*,
+                                              /api/notifications/auto-accept,
+                                              /api/sessions/:id/auto-accept,
+                                              /health, /config, /restart, /switch-dir
 ```
 
 ## Key Architecture Principles
 
 1. **Component-based architecture**: `src/App.tsx` (~1,500 lines) is the main orchestrator; UI components are in `src/components/` (chat, git, filetree, terminal, ui, app). Custom hooks are in `src/hooks/`.
 2. **Local state management**: UI state (theme, sidebar, models, agents, sessions) uses React local state with useState hooks. No external state library is used.
-3. **SDK for OpenCode operations**: All OpenCode-specific API calls (sessions, messages, providers, commands, events) use `@opencode-ai/sdk` v2 via `src/lib/opencode.ts`.
-4. **Express for custom operations**: Filesystem, git, terminal, permission persistence, MCP config, and server management stay as Express routes — the SDK does not cover these.
+3. **SDK for OpenCode operations**: All OpenCode-specific API calls (sessions, messages, providers, commands, events, permissions, questions) use `@opencode-ai/sdk` v2 via `src/lib/opencode.ts`.
+4. **Express for custom operations**: Filesystem, git, terminal, MCP config, autopilot/auto-accept logic, and server management stay as Express routes — the SDK does not cover these.
 5. **Bun runtime**: Uses Bun for package management and server runtime (`bun run server`).
 
 ### File Reading Limitations
@@ -89,6 +91,10 @@ const client = await getClient();
 | Abort session | `client.session.abort({ sessionID, directory })` |
 | List providers | `client.provider.list({ directory })` |
 | List commands | `client.command.list({ directory })` |
+| Permission reply | `client.permission.reply({ requestID, reply, directory })` |
+| Permission list (recovery) | `client.permission.list({ directory })` |
+| Question reply | `client.question.reply({ requestID, answers, directory })` |
+| Question reject | `client.question.reject({ requestID, directory })` |
 | SSE event stream | `client.global.event()` → `result.stream` async generator |
 
 ### SDK Response Shape
@@ -118,16 +124,15 @@ These are custom server-side operations the SDK doesn't cover:
 | Filesystem CRUD | `/api/fs/*` |
 | Git operations | `/api/git/*` |
 | Terminal (PTY) | `/api/terminal/*`, `WS /api/terminal/ws` |
-| Permission persistence | `/api/permission`, `/api/permission/reply` |
+| Autopilot toggle | `/api/notifications/auto-accept` |
 | Session auto-accept lineage | `/api/sessions/:id/auto-accept` |
 | MCP config CRUD | `/api/config/mcp/*` |
 | Custom providers config | `/api/config/providers/custom/*` |
-| Commands config | `/api/config/commands/*` |
+| Commands config (editor) | `/api/config/commands/*` |
 | Server health | `/health` |
 | Server config (port, dir) | `/config` |
 | Restart OpenCode | `/restart` |
 | Switch working directory | `/switch-dir` |
-| Question reply/reject | `/api/question/reply`, `/api/question/reject` | `client.question.reply()` / `client.question.reject()` — **migrated to SDK** |
 
 ## Important Rules
 
@@ -143,10 +148,11 @@ These are custom server-side operations the SDK doesn't cover:
 
 ## API Endpoints Reference
 
-### Permission API (Handled by Server)
-- `GET /api/permission?directory=...` — List pending permission requests from OpenCode. Used to recover permissions after page refresh.
-- `POST /api/permission/reply` — Reply to a permission request. Body: `{ sessionID, requestID, reply: "once"|"always"|"reject", directory }`.
-- **Persistence**: Permissions are persisted to `localStorage` (key: `oc_permissions`) and recovered on page load via API.
+### Permission API (via SDK)
+- `client.permission.list({ directory })` — list pending permission requests (used for recovery after refresh)
+- `client.permission.reply({ requestID, reply, directory })` — reply `"once"|"always"|"reject"` to a permission request
+- **Persistence**: Permissions are persisted to `localStorage` (key: `oc_permissions`) and recovered on page load via SDK.
+- **Autopilot**: Per-session auto-accept is managed by Express (`/api/notifications/auto-accept`, `/api/sessions/:id/auto-accept`) — this is custom logic not in the SDK.
 
 ### MCP Config API (Handled by Server)
 - `GET /api/config/mcp` — List all MCP servers from `.opencode/opencode.jsonc`.
