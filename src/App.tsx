@@ -727,7 +727,33 @@ function App() {
 
   const sendMessage = async () => {
     const text = inputText.trim();
-    if (!text || isLoading || !selectedModel || !workingDir) return;
+    if (!text || !workingDir) return;
+
+    // ── Interrupt mode: session is busy, inject message without expecting a reply ──
+    if (isLoading) {
+      const sid = sessionIdRef.current;
+      if (!sid || !selectedModel) return;
+      setInputText('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      // Add to UI as a user message (no assistant placeholder)
+      const tempId = `temp_user_${uid()}`;
+      setMessages(prev => [...prev, { id: tempId, role: 'user', content: text }]);
+      setPartsMap(prev => ({ ...prev, [tempId]: [{ id: uid(), type: 'text', text }] }));
+      try {
+        const client = await getClient();
+        await client.session.promptAsync({
+          sessionID: sid,
+          directory: getWorkingDir(),
+          model: { providerID: selectedModel.providerId, modelID: selectedModel.id },
+          parts: [{ type: 'text', text }],
+          agent: selectedAgent,
+          noReply: true, // inject mid-run without expecting a new AI reply
+        });
+      } catch { /* ignore — interrupt is best-effort */ }
+      return;
+    }
+
+    if (!selectedModel) return;
     setError(null);
 
     // Handle slash commands
@@ -1303,7 +1329,7 @@ function App() {
                 value={inputText}
                 onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
-                placeholder="How can I help you today? Type / for commands"
+                placeholder={isLoading ? "Interrupt: type to inject a message mid-run…" : "How can I help you today? Type / for commands"}
                 rows={1}
                 style={{
                   width: '100%', background: 'transparent', border: 'none', outline: 'none',
@@ -1410,23 +1436,31 @@ function App() {
 
                 {/* Send / Stop button */}
                 <button
-                  onClick={isLoading ? stopGeneration : sendMessage}
+                  onClick={isLoading && inputText.trim() ? sendMessage : isLoading ? stopGeneration : sendMessage}
                   disabled={!isLoading && !inputText.trim()}
+                  title={isLoading && inputText.trim() ? 'Inject message (interrupt)' : isLoading ? 'Stop generation' : 'Send'}
                   style={{
-                    background: isLoading ? 'transparent' : (!inputText.trim() ? 'transparent' : 'var(--accent)'),
+                    background: isLoading && inputText.trim() ? 'var(--accent)' : isLoading ? 'transparent' : (!inputText.trim() ? 'transparent' : 'var(--accent)'),
                     border: 'none',
                     borderRadius: '50%',
                     width: 32, height: 32,
                     cursor: (!isLoading && !inputText.trim()) ? 'not-allowed' : 'pointer',
-                    color: isLoading ? 'var(--red)' : (!inputText.trim() ? 'var(--text-5)' : 'var(--bg)'),
+                    color: isLoading && inputText.trim() ? 'var(--bg)' : isLoading ? 'var(--red)' : (!inputText.trim() ? 'var(--text-5)' : 'var(--bg)'),
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     flexShrink: 0,
                     transition: 'all 0.15s',
                   }}
                 >
-                  {isLoading ? (
+                  {isLoading && !inputText.trim() ? (
+                    /* Stop icon — loading, no text typed */
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+                  ) : isLoading && inputText.trim() ? (
+                    /* Inject/interrupt icon — loading, text typed */
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="13 17 18 12 13 7"/><path d="M6 12h12"/><circle cx="12" cy="12" r="10" strokeWidth="1.5"/>
+                    </svg>
                   ) : (
+                    /* Send icon */
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/>
                     </svg>
