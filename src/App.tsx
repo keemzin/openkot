@@ -573,6 +573,8 @@ function App() {
     const sid = sessionIdRef.current;
     if (!sid) return;
     const dir = getWorkingDir();
+
+    // Optimistically remove messages at and after the revert point
     setMessages(prev => {
       const idx = prev.findIndex(m => m.id === messageId);
       return idx >= 0 ? prev.slice(0, idx) : prev;
@@ -585,9 +587,12 @@ function App() {
       }
       return next;
     });
+
     try {
       const client = await getClient();
       await client.session.revert({ sessionID: sid, directory: dir, messageID: messageId });
+      // Reload messages after revert — OpenCode may have updated the session state
+      await loadSessionMessages(sid);
     } catch { /* ignore — optimistic state already applied */ }
   }, [messages, loadSessionMessages]);
 

@@ -135,10 +135,28 @@ export function useSessionEvents({
             continue;
           }
 
+          // ── message.removed ────────────────────────────────────────────
+          // Fired by OpenCode after revert — remove the message from UI
+          if (type === 'message.removed') {
+            const removedId = p.messageID as string;
+            if (removedId) {
+              onMessageUpdate(prev => prev.filter(m => m.id !== removedId));
+              onPartsUpdate(prev => {
+                const next = { ...prev };
+                delete next[removedId];
+                return next;
+              });
+            }
+            continue;
+          }
+
           // ── message.updated ────────────────────────────────────────────
           if (type === 'message.updated') {
             const info = p.info as any;
             if (!info?.id) continue;
+
+            // Skip messages that OpenCode has marked as reverted
+            if (info.revert) continue;
 
             onMessageUpdate(prev => {
               if (prev.some(m => m.id === info.id)) {
