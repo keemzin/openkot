@@ -38,7 +38,7 @@ OpenCode Binary (vendor/opencode)        Express Server (server/index.js)
 │   ├── stores/
 │   │   └── preferencesStore.ts # Font preferences (used by FontPicker)
 │   ├── hooks/
-│   │   └── useSessionEvents.ts # SSE event stream via SDK (client.global.event())
+│   │   └── useSessionEvents.ts # SSE event stream via SDK (client.event.subscribe({ directory }))
 │   ├── constants/           # Static constants (themes.ts)
 │   ├── styles/              # CSS files (prism.css)
 │   ├── components/
@@ -91,7 +91,7 @@ const client = await getClient();
 | Permission list (recovery) | `client.permission.list({ directory })` |
 | Question reply | `client.question.reply({ requestID, answers, directory })` |
 | Question reject | `client.question.reject({ requestID, directory })` |
-| SSE event stream | `client.global.event()` → `result.stream` async generator |
+| SSE event stream | `client.event.subscribe({ directory })` → `result.stream` async generator |
 
 ### SDK Response Shape
 

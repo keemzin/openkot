@@ -60,7 +60,7 @@ export function useSessionEvents({
           const client = await getClient();
           if (abort.signal.aborted) return;
 
-          const result = await client.global.event();
+          const result = await client.event.subscribe({ directory: getWorkingDir() || undefined });
           if (abort.signal.aborted) {
             result.stream.return(undefined);
             return;

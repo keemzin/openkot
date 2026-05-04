@@ -2,7 +2,7 @@
 
 OpenKot is just another wrapper around [OpenCode](https://opencode.ai) — so why does it exist?
 
-*Kot* is Malaysian slang for "maybe" or "probably" — used to soften a statement, like saying "I think so, but who knows." The name fits: this started as a "do I even need to build this?" project that became exactly the UI I wanted.
+In Malay slang, "kot" is commonly used to express uncertainty or probability. It can be likened to phrases like "maybe," "perhaps," or "I guess," and is often placed at the end of a sentence to soften a statement. For example, saying "Dia pergi kerja kot" means "Maybe he went to work". While it can imply a sense of confirmation, it is not typically used to express certainty without a doubt. Instead, it conveys a more casual or tentative approach to making claims.
 
 OpenCode is powerful, but the UI should feel like yours. I built OpenKot because I wanted an interface that behaves exactly the way I think it should — and you should have that too. Fork it, change it, make it yours. It's also structured so AI agents can understand and modify it quickly — see `AGENTS.md` for a full map of the codebase.
 
