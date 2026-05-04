@@ -127,7 +127,7 @@ These are custom server-side operations the SDK doesn't cover:
 | Server config (port, dir) | `/config` |
 | Restart OpenCode | `/restart` |
 | Switch working directory | `/switch-dir` |
-| Question reply/reject | `/api/question/reply`, `/api/question/reject` |
+| Question reply/reject | `/api/question/reply`, `/api/question/reject` | `client.question.reply()` / `client.question.reject()` — **migrated to SDK** |
 
 ## Important Rules
 

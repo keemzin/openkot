@@ -824,96 +824,38 @@ function App() {
 
   const replyToQuestion = async (requestID: string, answers: string[][]) => {
     const sid = sessionIdRef.current;
-    if (!sid) {
-      console.error('[App] replyToQuestion: no session ID');
-      return;
-    }
-    
-    // Optimistically remove question from UI
+    if (!sid) return;
+
+    // Optimistically remove from UI
     setQuestions(prev => {
-      const sessionQuestions = prev[sid] ?? [];
-      const filtered = sessionQuestions.filter(q => q.id !== requestID);
-      if (filtered.length === 0) {
-        const next = { ...prev };
-        delete next[sid];
-        return next;
-      }
+      const existing = prev[sid] ?? [];
+      const filtered = existing.filter(q => q.id !== requestID);
+      if (filtered.length === 0) { const next = { ...prev }; delete next[sid]; return next; }
       return { ...prev, [sid]: filtered };
     });
-    
-    const dir = getWorkingDir();
-    
+
     try {
-      const res = await fetch(`/api/question/reply`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionID: sid, requestID, answers, directory: dir })
-      });
-      
-      // Check if response is JSON
-      const contentType = res.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        // Question already removed optimistically, just return
-        return;
-      }
-      
-      if (!res.ok) {
-        const text = await res.text();
-        console.error('[App] replyToQuestion: error response:', text);
-        // Don't throw - question already removed optimistically
-        return;
-      }
-      const data = await res.json();
-    } catch (error) {
-      // Don't throw - question already removed
-    }
+      const client = await getClient();
+      await client.question.reply({ requestID, answers, directory: getWorkingDir() });
+    } catch { /* optimistic — already removed from UI */ }
   };
 
   const rejectQuestion = async (requestID: string) => {
     const sid = sessionIdRef.current;
-    if (!sid) {
-      console.error('[App] rejectQuestion: no session ID');
-      return;
-    }
-    
-    // Optimistically remove question from UI
+    if (!sid) return;
+
+    // Optimistically remove from UI
     setQuestions(prev => {
-      const sessionQuestions = prev[sid] ?? [];
-      const filtered = sessionQuestions.filter(q => q.id !== requestID);
-      if (filtered.length === 0) {
-        const next = { ...prev };
-        delete next[sid];
-        return next;
-      }
+      const existing = prev[sid] ?? [];
+      const filtered = existing.filter(q => q.id !== requestID);
+      if (filtered.length === 0) { const next = { ...prev }; delete next[sid]; return next; }
       return { ...prev, [sid]: filtered };
     });
-    
-    const dir = getWorkingDir();
-    
+
     try {
-      const res = await fetch(`/api/question/reject`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionID: sid, requestID, directory: dir })
-      });
-      
-      // Check if response is JSON
-      const contentType = res.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        // Question already removed optimistically, just return
-        return;
-      }
-      
-      if (!res.ok) {
-        const text = await res.text();
-        console.error('[App] rejectQuestion: error response:', text);
-        // Don't throw - question already removed optimistically
-        return;
-      }
-      const data = await res.json();
-    } catch (error) {
-      // Don't throw - question already removed
-    }
+      const client = await getClient();
+      await client.question.reject({ requestID, directory: getWorkingDir() });
+    } catch { /* optimistic — already removed from UI */ }
   };
 
   const iconBtnStyle: React.CSSProperties = {
