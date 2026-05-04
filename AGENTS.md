@@ -6,8 +6,6 @@ This project uses **Bun** (not NPM) as its primary runtime and package manager.
 
 This is a **web-based UI for OpenCode** — a chat interface that talks to the OpenCode CLI binary. The architecture combines a React-based frontend with an Express server that handles filesystem, git, terminal, and config operations directly, while OpenCode-specific operations now go through the official SDK.
 
-Can always refer here to see if there is similar implementation or feature to be added: `REFER/openchamber`
-
 ```
 React Frontend (src/main.tsx)
      ↓ SDK (direct, port 3358)              ↓ HTTP/WebSocket (via Express proxy)
@@ -29,9 +27,6 @@ OpenCode Binary (vendor/opencode)        Express Server (server/index.js)
 4. **Express for custom operations**: Filesystem, git, terminal, MCP config, autopilot/auto-accept logic, and server management stay as Express routes — the SDK does not cover these.
 5. **Bun runtime**: Uses Bun for package management and server runtime (`bun run server`).
 
-### File Reading Limitations
-- **`.env` files cannot be read while server is running** — Windows file locking prevents reading config files that are in use.
-- **Workaround**: Use the file tree panel to view `.env` files, or stop the server temporarily.
 
 ## Directory Structure
 
@@ -144,8 +139,10 @@ These are custom server-side operations the SDK doesn't cover:
 ### Package Manager
 - **Always use `bun`** commands: `bun install`, `bun run dev`, `bun run server`.
 
-### Reference Implementation
-- **REFER/openchamber** contains the canonical implementation for rendering patterns and terminal protocol.
+### Error Handling
+- When code errors occur, ask the user if they want deep inspection using Chrome DevTools for debugging.
+- Proactively offer to use available MCP tools (Context7, sequential-thinking, etc.) to diagnose and fix issues.
+
 
 ## API Endpoints Reference
 
@@ -170,7 +167,6 @@ These are custom server-side operations the SDK doesn't cover:
 - **Note**: `WORKING_DIR` can be absolute or relative to project root.
 
 ### Terminal API
-- `WS /api/terminal/ws` — WebSocket for terminal I/O (openchamber protocol v2).
 - `POST /api/terminal/create` — Create terminal session for specific working directory.
 - `DELETE /api/terminal/:sessionId` — Stop terminal session.
 - PTY backend uses `bun-pty` or `node-pty` with fallback logic.
@@ -198,6 +194,20 @@ Use `sequential-thinking` MCP for complex, multi-step problems that require:
 - Problems where the full scope isn't clear initially
 
 **DO NOT use** for simple tasks (listing files, reading single files, quick answers) — it adds unnecessary overhead.
+
+#### Context7 Documentation
+Always use `context7` MCP tools when you need:
+- Library or API documentation
+- Code generation for libraries/frameworks
+- Setup or configuration steps
+
+Use `context7_resolve-library-id` first to get the library ID, then `context7_query-docs` with your question. Do this proactively without explicit user request when working with libraries.
+
+Example workflow:
+```
+1. context7_resolve-library-id for "React" with query about useState
+2. context7_query-docs using the returned library ID
+```
 
 ## Common Tasks
 

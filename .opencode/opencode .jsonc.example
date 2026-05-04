@@ -1,5 +1,34 @@
 {
   "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "*": "allow",
+    "edit": {
+      "*": "ask",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "bash": "ask",
+    "read": {
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "grep": "ask",
+    "glob": "ask",
+    "list": "ask",
+    "task": "ask",
+    "skill": "ask",
+    "lsp": "ask",
+    "todoread": "ask",
+    "todowrite": "ask",
+    "webfetch": "ask",
+    "websearch": "ask",
+    "codesearch": "ask",
+    "external_directory": "ask",
+    "doom_loop": "ask",
+    "question": "ask"
+  },
   "mcp": {
     "chrome-devtools": {
       "type": "local",
@@ -8,7 +37,7 @@
         "-y",
         "chrome-devtools-mcp@latest"
       ],
-      "enabled": true
+      "enabled": false
     },
     "playwright": {
       "type": "local",
@@ -21,7 +50,7 @@
         "--isolated",
         "--headless"
       ],
-      "enabled": true
+      "enabled": false
     },
     "searxng": {
       "type": "local",
@@ -31,9 +60,9 @@
         "mcp-searxng"
       ],
       "environment": {
-        "SEARXNG_URL": "https://your-searxng.com"
+        "SEARXNG_URL": "https://your-searxng-instance.com"
       },
-      "enabled": true
+      "enabled": false
     },
     "fetch": {
       "type": "local",
@@ -42,14 +71,41 @@
         "-y",
         "mcp-fetch-server"
       ],
-      "enabled": true
+      "enabled": false
     },
     "jina": {
       "type": "remote",
       "enabled": false,
       "url": "https://mcp.jina.ai/v1",
       "headers": {
-        "JINA_API_KEY": "jina_keyItsFreeJsutGoogleem"
+        "JINA_API_KEY": "your_jina_api_key_here"
+      }
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "context7": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "npx",
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ]
+    }
+  },
+  "provider": {
+    "antigrav": {
+      "name": "antigrav",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://localhost:3344/v1/"
       }
     }
   }

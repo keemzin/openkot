@@ -27,6 +27,14 @@ if not exist ".env" (
   )
 )
 
+:: Check opencode config
+if not exist ".opencode\opencode.jsonc" (
+  if exist ".opencode\opencode .jsonc.example" (
+    echo [+] Copying opencode config example to .opencode\opencode.jsonc...
+    copy ".opencode\opencode .jsonc.example" ".opencode\opencode.jsonc" >nul
+  )
+)
+
 :: 1. Install dependencies
 echo [1/4] Installing dependencies...
 call bun install
