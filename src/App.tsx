@@ -1320,8 +1320,8 @@ function App() {
           </div>
         )}
 
-        {/* Input ” hidden when on plan/terminal tab */}
-        {activeTab !== 'plan' && activeTab !== 'terminal' && (
+         {/* Input — hidden when not on chat tab */}
+         {activeTab === 'chat' && (
         <div style={{ padding: '8px 12px calc(12px + env(safe-area-inset-bottom, 0px))', background: 'var(--bg)', flexShrink: 0 }}>
           <div style={{ maxWidth: 760, margin: '0 auto', position: 'relative' }}><div style={{
             background: 'var(--bg-3)',
@@ -1478,7 +1478,7 @@ function App() {
             </div>
           </div></div>{/* end max-width wrapper */}
         </div>
-        )} {/* end activeTab !== 'plan' */}
+         )} {/* end activeTab === 'chat' */}
       </div>
 
       {/* Right panel ” file tree, resizable */}
