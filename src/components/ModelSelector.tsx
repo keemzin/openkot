@@ -51,10 +51,15 @@ export function ModelSelector({
           overflow: 'hidden', 
           textOverflow: 'ellipsis', 
           whiteSpace: 'nowrap',
-          minWidth: 0, // Allow text to shrink
+          minWidth: 0,
           flex: 1,
         }}>
-          {selectedModel?.name ?? 'Select model'}
+          {selectedModel ? (
+            <>
+              <span style={{ opacity: 0.55, marginRight: 3 }}>{selectedModel.providerName}:</span>
+              {selectedModel.name}
+            </>
+          ) : 'Select model'}
         </span>
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5, flexShrink: 0 }}>
           <polyline points="6 9 12 15 18 9"/>
@@ -152,7 +157,8 @@ export function ModelSelector({
               const filteredModels = models.filter(m => 
                 !searchLower || 
                 m.name.toLowerCase().includes(searchLower) || 
-                m.id.toLowerCase().includes(searchLower)
+                m.id.toLowerCase().includes(searchLower) ||
+                m.providerName.toLowerCase().includes(searchLower)
               );
 
               if (filteredModels.length === 0) {
@@ -163,37 +169,43 @@ export function ModelSelector({
                 );
               }
 
-              return filteredModels.map(m => (
+              // Group by provider
+              const grouped = filteredModels.reduce<Record<string, { providerName: string; models: typeof filteredModels }>>((acc, m) => {
+                if (!acc[m.providerId]) acc[m.providerId] = { providerName: m.providerName, models: [] };
+                acc[m.providerId].models.push(m);
+                return acc;
+              }, {});
+
+              const renderModelButton = (m: (typeof filteredModels)[0]) => (
                 <button
                   key={m.id}
                   onClick={() => { 
                     setSelectedModel(m); 
                     setModelOpen(false);
                     setModelSearch('');
-                    // Save model selection for current session
                     if (sessionId) {
                       setSessionModelSelections(prev => ({ ...prev, [sessionId]: m.id }));
                     }
                   }}
                   style={{
-                    width: '100%', textAlign: 'left', padding: '10px 12px',
+                    width: '100%', textAlign: 'left', padding: '8px 12px',
                     background: m.id === selectedModel?.id ? 'var(--bg-3)' : 'transparent',
                     border: 'none', cursor: 'pointer', fontFamily: 'inherit',
                     display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
                     borderLeft: m.id === selectedModel?.id ? '2px solid var(--accent)' : '2px solid transparent',
-                    minWidth: 0, // Allow flex item to shrink
+                    minWidth: 0,
                   }}
                   onMouseEnter={e => { if (m.id !== selectedModel?.id) (e.currentTarget as HTMLButtonElement).style.background = 'var(--bg-5)'; }}
                   onMouseLeave={e => { if (m.id !== selectedModel?.id) (e.currentTarget as HTMLButtonElement).style.background = 'transparent'; }}
                 >
                   <span style={{ 
-                    fontSize: 14, 
+                    fontSize: 13, 
                     color: 'var(--text)', 
                     overflow: 'hidden', 
                     textOverflow: 'ellipsis', 
                     whiteSpace: 'nowrap', 
                     flex: 1,
-                    minWidth: 0, // Allow text to shrink
+                    minWidth: 0,
                   }}>
                     {m.name}
                   </span>
@@ -206,6 +218,29 @@ export function ModelSelector({
                     )}
                   </div>
                 </button>
+              );
+
+              // When searching, skip grouping headers for cleaner results
+              if (searchLower) {
+                return filteredModels.map(renderModelButton);
+              }
+
+              // Grouped view with provider headers
+              return Object.entries(grouped).map(([providerId, group]) => (
+                <div key={providerId}>
+                  <div style={{
+                    padding: '8px 12px 4px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--accent)',
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                    opacity: 0.85,
+                  }}>
+                    {group.providerName}
+                  </div>
+                  {group.models.map(renderModelButton)}
+                </div>
               ));
             })()}
           </div>
