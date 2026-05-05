@@ -1,10 +1,10 @@
 ---
-name: qurandev
-description: Fetch word-by-word breakdown + 1 tafsir (Ma'arif-ul-Quran) via Quran.com API with sentence-based chunking for memorization
+name: qurandev-ubuntu
+description: Fetch word-by-word breakdown + 1 tafsir (Ma'arif-ul-Quran) via Quran.com API with sentence-based chunking for memorization (Ubuntu/Linux optimized with curl)
 agent: build
 ---
 
-# /qurandev Command
+# /qurandev-ubuntu Command
 
 Fetch word-by-word breakdown + 1 tafsir (Ma'arif-ul-Quran) via Quran.com API. Output includes sentence-based chunking for memorization.
 
@@ -25,7 +25,7 @@ Extract `chapter` (surah number) and `verse` number:
 
 ### 2. Fetch Verse Data
 ```bash
-Invoke-RestMethod -Uri "https://api.quran.com/api/v4/verses/by_key/${chapter}:${verse}?words=true&word_translation_language=en&translations=20,33"
+curl -s "https://api.quran.com/api/v4/verses/by_key/${chapter}:${verse}?words=true&word_translation_language=en&translations=20,33"
 ```
 Extract:
 - Verse key: `verse.verse_key`
@@ -38,7 +38,7 @@ Extract:
 ### 3. Fetch Tafsir
 #### Ma'arif-ul-Quran - Slug: en-tafsir-maarif-ul-quran
 ```bash
-Invoke-RestMethod -Uri "https://api.quran.com/api/v4/tafsirs/en-tafsir-maarif-ul-quran/by_ayah/${chapter}:${verse}"
+curl -s "https://api.quran.com/api/v4/tafsirs/en-tafsir-maarif-ul-quran/by_ayah/${chapter}:${verse}"
 ```
 Extract `tafsir.text` (HTML, often long).
 
@@ -98,7 +98,7 @@ Describe a vivid mental image that captures the verse's meaning to aid memorizat
 {plain_text_tafsir}
 
 ## Notes
-- Uses `Invoke-RestMethod` (PowerShell) for fast API fetches (no browser needed)
+- Uses `curl` for fast API fetches (optimized for Ubuntu/Linux)
 - Ma'arif-ul-Quran output is simplified to avoid excessive length
 - Tafsirs may cover verse groups; output notes the range if applicable
-- Add more Surah name mappings to Step 1 as needed
+- Add more Surah name mappings to Step1 as needed
