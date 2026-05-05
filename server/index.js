@@ -89,15 +89,15 @@ async function killOpenCode() {
 
   if (!pid) return;
 
-  // Try graceful kill first
-  try { if (proc) proc.kill('SIGTERM'); } catch {}
+  // Try graceful kill first (no signal = SIGTERM on Bun)
+  try { if (proc) proc.kill(); } catch {}
 
-  if (proc && await waitForProcessClose(proc, 2500)) {
+  if (proc && await waitForProcessClose(proc, 3000)) {
     console.log('[OpenCode] Process exited cleanly.');
     return;
   }
 
-  // Windows: escalate through taskkill /T then /F
+  // Windows: use taskkill to kill process tree
   if (process.platform === 'win32') {
     for (const flags of [['/pid', String(pid), '/t'], ['/pid', String(pid), '/f', '/t']]) {
       try {
@@ -105,21 +105,25 @@ async function killOpenCode() {
         spawnSync('taskkill', flags, { stdio: 'ignore', timeout: 5000, windowsHide: true });
       } catch {}
       if (!proc || hasProcessExited(proc)) break;
-      if (proc) await waitForProcessClose(proc, 1500);
+      if (proc) await waitForProcessClose(proc, 2000);
     }
   } else {
+    // Unix: SIGKILL
     try { if (proc) proc.kill('SIGKILL'); } catch {}
-    if (proc) await waitForProcessClose(proc, 1000);
+    await waitForProcessClose(proc, 2000);
   }
-
-  console.log('[OpenCode] Kill sequence complete.');
 }
 
 async function waitForPortFree(port, timeoutMs = 10000) {
   const deadline = Date.now() + timeoutMs;
+  // Always probe localhost for port availability
+  const probeHost = (!OPENCODE_HOST || OPENCODE_HOST === '0.0.0.0' || OPENCODE_HOST === '::' || OPENCODE_HOST === '[::]')
+    ? '127.0.0.1'
+    : OPENCODE_HOST;
+
   while (Date.now() < deadline) {
     const inUse = await new Promise((resolve) => {
-      const sock = createConnection({ port, host: OPENCODE_HOST });
+      const sock = createConnection({ port, host: probeHost });
       const t = setTimeout(() => { sock.destroy(); resolve(false); }, 400);
       sock.once('connect', () => { clearTimeout(t); sock.destroy(); resolve(true); });
       sock.once('error', () => { clearTimeout(t); resolve(false); });
@@ -162,8 +166,9 @@ async function spawnOpenCode(dir) {
   console.log(`[OpenCode] Binary: ${VENDOR_OPENCODE}`);
 
   const proc = Bun.spawn({
-    cmd: [VENDOR_OPENCODE, 'serve', '--port', String(OPENCODE_PORT), '--hostname', OPENCODE_HOST],
+    cmd: [VENDOR_OPENCODE, 'serve', '--port', String(OPENCODE_PORT), '--hostname', OPENCODE_HOST, '--cors'],
     cwd: dir,
+    env: { ...process.env },
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -237,22 +242,34 @@ async function spawnOpenCode(dir) {
   console.log('[OpenCode] Process signalled ready, verifying API...');
 }
 
+const START_OPENCODE_MAX_ATTEMPTS = 3;
+
 async function startOpenCode(cwd) {
   const dir = cwd || currentWorkingDir;
-  await killOpenCode();
-  await waitForPortFree(OPENCODE_PORT, 10000);
+  let lastError = null;
 
-  try {
-    await spawnOpenCode(dir);
-    await waitForOpenCodeReady(20000);
-    currentWorkingDir = dir; // Only set AFTER successful start
-    console.log('[OpenCode] Fully ready!');
-  } catch (e) {
-    console.error('[OpenCode] Start error:', e.message);
-    isOpenCodeReady = false;
-    lastOpenCodeError = e.message;
-    throw e;
+  for (let attempt = 1; attempt <= START_OPENCODE_MAX_ATTEMPTS; attempt++) {
+    try {
+      await killOpenCode();
+      // Don't wait for port - just try to start and retry if it fails
+      await spawnOpenCode(dir);
+      await waitForOpenCodeReady(20000);
+      currentWorkingDir = dir; // Only set AFTER successful start
+      console.log('[OpenCode] Fully ready!');
+      return;
+    } catch (e) {
+      lastError = e;
+      console.warn(`[OpenCode] Start attempt ${attempt}/${START_OPENCODE_MAX_ATTEMPTS} failed: ${e.message}`);
+      if (attempt >= START_OPENCODE_MAX_ATTEMPTS) break;
+      // Wait before retrying
+      await new Promise(r => setTimeout(r, 1000 * attempt));
+    }
   }
+
+  console.error('[OpenCode] All start attempts failed');
+  isOpenCodeReady = false;
+  lastOpenCodeError = lastError?.message || 'Failed to start OpenCode';
+  throw lastError;
 }
 
 async function restartOpenCode(cwd) {
