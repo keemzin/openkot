@@ -323,6 +323,30 @@ async function start() {
     res.json({ workingDir: currentWorkingDir, rootDir: WORKING_DIR, opencodePort: OPENCODE_PORT, opencodeHost: OPENCODE_HOST });
   });
 
+  // List all running openkot instances from ~/.openkot.json
+  app.get('/instances', (_req, res) => {
+    try {
+      const configPath = path.join(os.homedir(), '.openkot.json');
+      if (!fs.existsSync(configPath)) return res.json([]);
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      const originalInstances = config.instances ?? [];
+      const instances = originalInstances.filter(i => {
+        if (!i.pid || typeof i.pid !== 'number' || i.pid <= 0) return false;
+        // Check if process is still running
+        try { process.kill(i.pid, 0); return true; } catch { return false; }
+      });
+      // Write back cleaned list asynchronously if changed
+      if (instances.length !== originalInstances.length) {
+        fs.promises.writeFile(configPath, JSON.stringify({ ...config, instances }, null, 2))
+          .catch(e => console.error('Failed to clean instances config:', e));
+      }
+      res.json(instances);
+    } catch (e) {
+      console.error('Failed to list instances:', e);
+      res.json([]);
+    }
+  });
+
   const jsonBody = express.json();
 
   // Switch working directory — NO RESTART, just update currentWorkingDir

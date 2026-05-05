@@ -57,6 +57,7 @@ import { QuestionCard, type QuestionRequest } from './components/app/QuestionCar
 import { PermissionCard, type PermissionRequest } from './components/app/PermissionCard';
 import { SessionItem, type SessionInfo } from './components/app/SessionItem';
 import { PlanView } from './components/app/PlanView';
+import { InstancesPanel } from './components/app/InstancesPanel';
 import { RightPanelContent } from './components/app/RightPanelContent';
 
 const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
@@ -229,7 +230,7 @@ function App() {
     setTheme(target);
   };
 
-  const [activeTab, setActiveTab] = useState<'chat' | 'plan' | 'terminal'>('chat');
+  const [activeTab, setActiveTab] = useState<'chat' | 'plan' | 'terminal' | 'instances'>('chat');
   const [sessionPlanPaths, setSessionPlanPaths] = useState<Record<string, string>>({});
   const [commands, setCommands] = useState<{ name: string; description: string; template: string }[]>([]);
   const [showCmdDropdown, setShowCmdDropdown] = useState(false);
@@ -1165,7 +1166,7 @@ function App() {
           {/* Plan/Terminal tab row */}
           {workingDir && (
             <div style={{ display: 'flex', alignItems: 'center', padding: '0 12px 6px', gap: 4 }}>
-              {(['chat', 'plan', 'terminal'] as const).map(tab => {
+              {(['chat', 'plan', 'terminal', 'instances'] as const).map(tab => {
                 if (tab === 'plan' && sessionId && !sessionPlanPaths[sessionId]) return null;
                 return (
                 <button key={tab} onClick={() => setActiveTab(tab)} style={{
@@ -1186,6 +1187,11 @@ function App() {
                       <polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/>
                     </svg>
                   )}
+                  {tab === 'instances' && (
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+                    </svg>
+                  )}
                   {tab.charAt(0).toUpperCase() + tab.slice(1)}
                 </button>
                 );
@@ -1204,6 +1210,8 @@ function App() {
         {/* Messages or Plan view */}
         {activeTab === 'plan' && sessionId && sessionPlanPaths[sessionId] ? (
           <PlanView planPath={sessionPlanPaths[sessionId]} workingDir={workingDir} />
+        ) : activeTab === 'instances' ? (
+          <InstancesPanel currentPort={window.location.port ? parseInt(window.location.port) : 80} />
         ) : activeTab !== 'terminal' && (
           /* Chat view ” shown when chat tab is active */
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
