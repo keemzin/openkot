@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { getClient } from '../../lib/opencode';
 
 interface DirPickerProps {
   current: string;
@@ -7,11 +8,21 @@ interface DirPickerProps {
   onClose: () => void;
 }
 
+interface Project {
+  id: string;
+  worktree: string;
+  vcs?: string;
+  icon?: { color: string };
+}
+
 export function DirPicker({ current, rootDir, onSwitch, onClose }: DirPickerProps) {
   const [browsePath, setBrowsePath] = useState(current);
   const [entries, setEntries] = useState<Array<{ name: string; path: string; isDirectory: boolean }>>([]);
   const [loading, setLoading] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [activeTab, setActiveTab] = useState<'recent' | 'browse'>('recent');
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectsLoading, setProjectsLoading] = useState(false);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -19,6 +30,19 @@ export function DirPicker({ current, rootDir, onSwitch, onClose }: DirPickerProp
     window.addEventListener('resize', checkMobile);
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
+
+  // Load recent projects from OpenCode Project API
+  useEffect(() => {
+    if (activeTab !== 'recent') return;
+    setProjectsLoading(true);
+    getClient().then(client => {
+      // @ts-ignore - project API might not be in SDK types
+      return (client as any).project.list({ directory: rootDir });
+    }).then((resp: any) => {
+      const data = resp?.data ?? resp;
+      setProjects(Array.isArray(data) ? data : []);
+    }).catch(() => setProjects([])).finally(() => setProjectsLoading(false));
+  }, [activeTab, rootDir]);
 
   const normRoot = rootDir.replace(/\\/g, '/').toLowerCase();
   const isAtRoot = browsePath.replace(/\\/g, '/').toLowerCase() === normRoot;
@@ -53,6 +77,10 @@ export function DirPicker({ current, rootDir, onSwitch, onClose }: DirPickerProp
     loadDir(parent);
   };
 
+  const handleProjectClick = (worktree: string) => {
+    onSwitch(worktree);
+  };
+
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', zIndex: 9998, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
       onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
@@ -71,38 +99,82 @@ export function DirPicker({ current, rootDir, onSwitch, onClose }: DirPickerProp
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text-4)', cursor: 'pointer', fontSize: 16 }}>✕</button>
         </div>
 
-        <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--bg-4)' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 13, padding: '8px 10px', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {toRelative(browsePath)}
-            </div>
-            <button onClick={() => onSwitch(browsePath)} style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, color: 'var(--bg)', fontSize: 14, padding: '8px 18px', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', flexShrink: 0 }}>Open</button>
-          </div>
-          <div style={{ fontSize: 11, color: 'var(--text-5)', marginTop: 4 }}>Root: WORKSPACE</div>
+        {/* Tabs */}
+        <div style={{ display: 'flex', borderBottom: '1px solid var(--bg-4)' }}>
+          <button onClick={() => setActiveTab('recent')} style={{
+            flex: 1, padding: '10px 16px', background: 'transparent', border: 'none',
+            borderBottom: activeTab === 'recent' ? '2px solid var(--accent)' : '2px solid transparent',
+            color: activeTab === 'recent' ? 'var(--text)' : 'var(--text-3)',
+            cursor: 'pointer', fontSize: 13, fontWeight: 500
+          }}>Recent Projects</button>
+          <button onClick={() => setActiveTab('browse')} style={{
+            flex: 1, padding: '10px 16px', background: 'transparent', border: 'none',
+            borderBottom: activeTab === 'browse' ? '2px solid var(--accent)' : '2px solid transparent',
+            color: activeTab === 'browse' ? 'var(--text)' : 'var(--text-3)',
+            cursor: 'pointer', fontSize: 13, fontWeight: 500
+          }}>Browse</button>
         </div>
 
-        <div style={{ padding: '6px 8px 4px', borderBottom: '1px solid var(--bg-4)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <button onClick={goUp} title="Go up" disabled={isAtRoot}
-            style={{ background: 'transparent', border: 'none', color: isAtRoot ? 'var(--bg-5)' : 'var(--text-3)', cursor: isAtRoot ? 'not-allowed' : 'pointer', fontSize: isMobile ? 18 : 14, padding: isMobile ? '4px 10px' : '2px 6px' }}>⤴️</button>
-          <span style={{ fontSize: isMobile ? 13 : 11, color: 'var(--text-3)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{toRelative(browsePath)}</span>
-          {loading && <span style={{ fontSize: 11, color: 'var(--text-5)' }}>…</span>}
-        </div>
-        <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
-          {entries.map(e => {
-            return (
-              <div key={e.path}
-                onClick={() => { loadDir(e.path); }}
+        {/* Recent Projects Tab */}
+        {activeTab === 'recent' && (
+          <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+            {projectsLoading && <div style={{ padding: '12px 16px', color: 'var(--text-5)', fontSize: 12 }}>Loading projects...</div>}
+            {!projectsLoading && projects.length === 0 && <div style={{ padding: '12px 16px', color: 'var(--text-5)', fontSize: 12 }}>No recent projects</div>}
+            {projects.map(p => (
+              <div key={p.id}
+                onClick={() => handleProjectClick(p.worktree)}
                 style={{ display: 'flex', alignItems: 'center', gap: 10, padding: isMobile ? '12px 16px' : '8px 16px', cursor: 'pointer' }}
                 onMouseEnter={el => (el.currentTarget.style.background = 'var(--bg-4)')}
                 onMouseLeave={el => (el.currentTarget.style.background = 'transparent')}
               >
-                <span style={{ fontSize: isMobile ? 20 : 16 }}>📁</span>
-                <span style={{ fontSize: isMobile ? 15 : 13, color: 'var(--text-2)', fontWeight: 500 }}>{e.name}</span>
+                <span style={{ fontSize: isMobile ? 20 : 16 }}>{p.icon?.color ? '📁' : '📂'}</span>
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <div style={{ fontSize: isMobile ? 15 : 13, color: 'var(--text-2)', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.worktree.split('\\').pop()}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-5)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.worktree}</div>
+                </div>
+                {p.vcs && <span style={{ fontSize: 11, color: 'var(--text-5)', textTransform: 'uppercase' }}>{p.vcs}</span>}
               </div>
-            );
-          })}
-          {!loading && entries.length === 0 && <div style={{ padding: '12px 16px', color: 'var(--text-5)', fontSize: 12 }}>No subdirectories</div>}
-        </div>
+            ))}
+          </div>
+        )}
+
+        {/* Browse Tab */}
+        {activeTab === 'browse' && (
+          <>
+            <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--bg-4)' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <div style={{ flex: 1, background: 'var(--bg)', border: '1px solid var(--border-2)', borderRadius: 6, color: 'var(--text)', fontSize: 13, padding: '8px 10px', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {toRelative(browsePath)}
+                </div>
+                <button onClick={() => onSwitch(browsePath)} style={{ background: 'var(--accent)', border: 'none', borderRadius: 6, color: 'var(--bg)', fontSize: 14, padding: '8px 18px', cursor: 'pointer', fontWeight: 700, fontFamily: 'inherit', flexShrink: 0 }}>Open</button>
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text-5)', marginTop: 4 }}>Root: WORKSPACE</div>
+            </div>
+
+            <div style={{ padding: '6px 8px 4px', borderBottom: '1px solid var(--bg-4)', display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button onClick={goUp} title="Go up" disabled={isAtRoot}
+                style={{ background: 'transparent', border: 'none', color: isAtRoot ? 'var(--bg-5)' : 'var(--text-3)', cursor: isAtRoot ? 'not-allowed' : 'pointer', fontSize: isMobile ? 18 : 14, padding: isMobile ? '4px 10px' : '2px 6px' }}>⤴️</button>
+              <span style={{ fontSize: isMobile ? 13 : 11, color: 'var(--text-3)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{toRelative(browsePath)}</span>
+              {loading && <span style={{ fontSize: 11, color: 'var(--text-5)' }}>…</span>}
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto', padding: '4px 0' }}>
+              {entries.map(e => {
+                return (
+                  <div key={e.path}
+                    onClick={() => { loadDir(e.path); }}
+                    style={{ display: 'flex', alignItems: 'center', gap: 10, padding: isMobile ? '12px 16px' : '8px 16px', cursor: 'pointer' }}
+                    onMouseEnter={el => (el.currentTarget.style.background = 'var(--bg-4)')}
+                    onMouseLeave={el => (el.currentTarget.style.background = 'transparent')}
+                  >
+                    <span style={{ fontSize: isMobile ? 20 : 16 }}>📁</span>
+                    <span style={{ fontSize: isMobile ? 15 : 13, color: 'var(--text-2)', fontWeight: 500 }}>{e.name}</span>
+                  </div>
+                );
+              })}
+              {!loading && entries.length === 0 && <div style={{ padding: '12px 16px', color: 'var(--text-5)', fontSize: 12 }}>No subdirectories</div>}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
