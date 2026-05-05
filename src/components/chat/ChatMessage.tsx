@@ -5,11 +5,13 @@ import { Markdown } from './Markdown';
 import { ToolGroup } from './ToolGroup';
 import { usePreferencesStore } from '../../stores/preferencesStore';
 
-export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStreaming, onFork, onRevert, hideTools }: {
+export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStreaming, onFork, onRevert, hideTools, modelName, providerName }: {
   msg: Message; parts?: Part[]; isStreaming?: boolean;
   onFork?: (messageId: string) => void;
   onRevert?: (messageId: string) => void;
   hideTools?: boolean;
+  modelName?: string;
+  providerName?: string;
 }) {
   const isUser = msg.role === 'user';
   const [copied, setCopied] = useState(false);
@@ -87,7 +89,8 @@ export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStrea
           : <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
         }
       </button>
-      {onFork && !msg.id.startsWith('temp_') && (
+      {/* Fork — user messages only */}
+      {isUser && onFork && !msg.id.startsWith('temp_') && (
         <button onClick={() => onFork(msg.id)} title="Fork session from here" style={{
           width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 4,
@@ -108,10 +111,10 @@ export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStrea
           onMouseEnter={e => (e.currentTarget.style.color = 'var(--red, #e06c75)')}
           onMouseLeave={e => (e.currentTarget.style.color = 'var(--border-2)')}
         >
-          {/* undo/revert arrow */}
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 7v6h6"/><path d="M3 13C5.33 7.67 10.67 4 17 4a9 9 0 0 1 0 18H3"/></svg>
         </button>
-      )}      {msg.role === 'assistant' && !isStreaming && msg.tokens && (
+      )}
+      {msg.role === 'assistant' && !isStreaming && msg.tokens && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           {msg.tokens.input != null && (
             <span style={{ fontSize: 10, color: 'var(--text-5)' }}>↑ {msg.tokens.input.toLocaleString()} in</span>

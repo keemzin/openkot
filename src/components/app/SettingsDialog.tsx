@@ -74,7 +74,7 @@ const CommandEditor = ({ command, onSave, onCancel }: { command: Command; onSave
       <div>
         <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Content (Markdown)</label>
         <textarea value={draft.content} onChange={e => setDraft({ ...draft, content: e.target.value })} placeholder="Command implementation in Markdown"
-          rows={8} style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace' }} />
+          rows={16} style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace', minHeight: 200 }} />
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
         <button onClick={() => onSave(draft)} style={{ padding: '5px 10px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}>Save</button>
@@ -102,6 +102,9 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
   // Models tab state
   const [customProviders, setCustomProviders] = useState<CustomProvider[]>([]);
   const [showAddProvider, setShowAddProvider] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<CustomProvider | null>(null);
+  const [editProviderModelInput, setEditProviderModelInput] = useState('');
+  const [editProviderEnvInput, setEditProviderEnvInput] = useState('');
   const [newProvider, setNewProvider] = useState<CustomProvider>({ name: '', displayName: '', npm: '@ai-sdk/openai-compatible', baseUrl: '', apiKey: '', models: [], environment: {} });
   const [newModelInput, setNewModelInput] = useState('');
   const [newEnvInput, setNewEnvInput] = useState('');
@@ -245,6 +248,7 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
       return [...prev, provider];
     });
     setShowAddProvider(false);
+    setEditingProvider(null);
 
     setNewProvider({ name: '', displayName: '', npm: '@ai-sdk/openai-compatible', baseUrl: '', apiKey: '', models: [], environment: {} });
     setNewModelInput('');
@@ -634,24 +638,82 @@ export function SettingsDialog({ onClose, models }: SettingsDialogProps) {
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {customProviders.map(p => (
-                        <div key={p.name} style={{ padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 4 }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{p.name}</span>
-                            <button onClick={() => deleteCustomProvider(p.name)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Remove</button>
-                          </div>
-                           {p.baseUrl && <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 2 }}>{p.baseUrl}</div>}
-                           {p.environment && Object.keys(p.environment).length > 0 && (
-                             <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 2 }}>
-                               Env: {Object.entries(p.environment).map(([k, v]) => `${k}=${v}`).join(', ')}
-                             </div>
-                           )}
-                           {p.models && p.models.length > 0 && (
-                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
-                               {p.models.map(m => (
-                                 <span key={m} style={{ fontSize: 10, padding: '1px 6px', background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 3, color: 'var(--text-3)' }}>{m}</span>
-                               ))}
-                             </div>
-                           )}
+                        <div key={p.name} style={{ borderRadius: 4, border: '1px solid var(--border)', overflow: 'hidden' }}>
+                          {editingProvider?.name === p.name ? (
+                            /* Inline edit form */
+                            <div style={{ padding: 12, background: 'var(--bg-2)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              <h4 style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', margin: 0 }}>Edit Provider: {p.name}</h4>
+                              <div style={{ display: 'flex', gap: 8 }}>
+                                <div style={{ flex: 1 }}>
+                                  <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Display Name</label>
+                                  <input value={editingProvider.displayName} onChange={e => setEditingProvider(ep => ep ? { ...ep, displayName: e.target.value } : ep)}
+                                    style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
+                                </div>
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Base URL</label>
+                                <input value={editingProvider.baseUrl} onChange={e => setEditingProvider(ep => ep ? { ...ep, baseUrl: e.target.value } : ep)}
+                                  style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>API Key (optional)</label>
+                                <input value={editingProvider.apiKey} onChange={e => setEditingProvider(ep => ep ? { ...ep, apiKey: e.target.value } : ep)}
+                                  type="password" placeholder="Leave empty for local providers"
+                                  style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12 }} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Environment Variables (KEY=VALUE, one per line)</label>
+                                <textarea value={editProviderEnvInput} onChange={e => setEditProviderEnvInput(e.target.value)}
+                                  rows={2} style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace' }} />
+                              </div>
+                              <div>
+                                <label style={{ fontSize: 11, color: 'var(--text-3)', display: 'block', marginBottom: 2 }}>Models (one per line)</label>
+                                <textarea value={editProviderModelInput} onChange={e => setEditProviderModelInput(e.target.value)}
+                                  rows={3} style={{ width: '100%', padding: '6px 8px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 12, resize: 'vertical', fontFamily: 'monospace' }} />
+                                <button onClick={async () => {
+                                  if (!editingProvider.baseUrl) return;
+                                  const fetched = await fetchModelsFromProvider(editingProvider.baseUrl, editingProvider.apiKey);
+                                  setEditProviderModelInput(fetched.join('\n'));
+                                }} disabled={!editingProvider.baseUrl}
+                                  style={{ marginTop: 4, padding: '3px 8px', background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 3, color: 'var(--text-2)', cursor: 'pointer', fontSize: 11 }}>Fetch from /v1/models</button>
+                              </div>
+                              <div style={{ display: 'flex', gap: 6 }}>
+                                <button onClick={() => {
+                                  const modelList = editProviderModelInput.split(/[\n,]/).map(s => s.trim()).filter(Boolean);
+                                  const envObj: Record<string, string> = {};
+                                  editProviderEnvInput.split('\n').forEach(line => { const [k, ...v] = line.split('='); if (k?.trim()) envObj[k.trim()] = v.join('=').trim(); });
+                                  saveCustomProvider({ ...editingProvider, models: modelList, environment: envObj });
+                                }} style={{ padding: '5px 10px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}>Save</button>
+                                <button onClick={() => setEditingProvider(null)} style={{ padding: '5px 10px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer', fontSize: 12 }}>Cancel</button>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Normal card view */
+                            <div style={{ padding: '10px 12px', background: 'var(--bg-2)' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                                <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', flex: 1 }}>{p.name}</span>
+                                <button onClick={() => {
+                                  setEditingProvider({ ...p });
+                                  setEditProviderModelInput((p.models ?? []).join('\n'));
+                                  setEditProviderEnvInput(Object.entries(p.environment ?? {}).map(([k, v]) => `${k}=${v}`).join('\n'));
+                                }} style={{ padding: '3px 8px', background: 'var(--accent)', border: 'none', borderRadius: 3, color: 'white', cursor: 'pointer', fontSize: 11 }}>Edit</button>
+                                <button onClick={() => deleteCustomProvider(p.name)} style={{ padding: '3px 8px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer', fontSize: 11 }}>Remove</button>
+                              </div>
+                              {p.baseUrl && <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 2 }}>{p.baseUrl}</div>}
+                              {p.environment && Object.keys(p.environment).length > 0 && (
+                                <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 2 }}>
+                                  Env: {Object.entries(p.environment).map(([k, v]) => `${k}=${v}`).join(', ')}
+                                </div>
+                              )}
+                              {p.models && p.models.length > 0 && (
+                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                                  {p.models.map(m => (
+                                    <span key={m} style={{ fontSize: 10, padding: '1px 6px', background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 3, color: 'var(--text-3)' }}>{m}</span>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>

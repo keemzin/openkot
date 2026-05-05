@@ -15,9 +15,11 @@ type SessionItemProps = {
   onRename: (id: string, title: string) => void;
   onDelete: (id: string) => void;
   isSubSession?: boolean;
+  pinned?: boolean;
+  onPin?: (id: string) => void;
 };
 
-export function SessionItem({ session, active, busy, onClick, onRename, onDelete, isSubSession }: SessionItemProps) {
+export function SessionItem({ session, active, busy, onClick, onRename, onDelete, isSubSession, pinned, onPin }: SessionItemProps) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState('');
   const [menuPos, setMenuPos] = useState<{ x: number; y: number } | null>(null);
@@ -101,6 +103,11 @@ export function SessionItem({ session, active, busy, onClick, onRename, onDelete
             />
           ) : (
             <span style={{ display: 'flex', alignItems: 'center', gap: 5, overflow: 'hidden' }}>
+              {pinned && (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="var(--accent)" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.8 }}>
+                  <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                </svg>
+              )}
               {isSubSession ? (
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#98c379" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
                   <circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>
@@ -130,6 +137,12 @@ export function SessionItem({ session, active, busy, onClick, onRename, onDelete
       {/* Context menu */}
       {menuPos && (
         <div ref={menuRef} style={{ position: 'fixed', top: menuPos.y, left: menuPos.x, zIndex: 9999, background: 'var(--bg-4)', border: '1px solid var(--border-2)', borderRadius: 8, minWidth: 140, boxShadow: '0 8px 24px rgba(0,0,0,0.6)', padding: '4px 0' }}>
+          {onPin && (
+            <button onClick={e => { e.stopPropagation(); setMenuPos(null); onPin(session.id); }} style={{ width: '100%', textAlign: 'left', padding: '6px 14px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, color: 'var(--text-2)' }}
+              onMouseEnter={e => (e.currentTarget.style.background = '#2e2c2c')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
+              {pinned ? '📌 Unpin' : '📌 Pin'}
+            </button>
+          )}
           <button onClick={startRename} style={{ width: '100%', textAlign: 'left', padding: '6px 14px', background: 'transparent', border: 'none', cursor: 'pointer', fontFamily: 'inherit', fontSize: 12, color: 'var(--text-2)' }}
             onMouseEnter={e => (e.currentTarget.style.background = '#2e2c2c')} onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
             Rename

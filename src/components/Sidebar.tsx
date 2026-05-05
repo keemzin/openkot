@@ -13,6 +13,7 @@ interface SidebarProps {
   busySessions: Set<string>;
   sidebarWidth: number;
   sessionSearch: string;
+  pinnedSessions: Set<string>;
   
   // Setters
   setSidebarOpen: (open: boolean | ((prev: boolean) => boolean)) => void;
@@ -26,6 +27,7 @@ interface SidebarProps {
   switchDirectory: (dir: string) => void;
   renameSession: (id: string, title: string) => void;
   deleteSession: (id: string) => void;
+  togglePinSession: (id: string) => void;
 }
 
 export function Sidebar({
@@ -38,6 +40,7 @@ export function Sidebar({
   busySessions,
   sidebarWidth,
   sessionSearch,
+  pinnedSessions,
   setSidebarOpen,
   setSidebarWidth,
   setSessionSearch,
@@ -47,6 +50,7 @@ export function Sidebar({
   switchDirectory,
   renameSession,
   deleteSession,
+  togglePinSession,
 }: SidebarProps) {
   const sidebarRef = useRef<HTMLDivElement>(null);
   const sidebarResizing = useRef(false);
@@ -189,7 +193,6 @@ export function Sidebar({
             // Separate parent sessions and sub-sessions
             const parentSessions = filtered.filter(s => !s.parentID);
             const subSessionsMap = new Map<string, SessionInfo[]>();
-            
             filtered.forEach(s => {
               if (s.parentID) {
                 const existing = subSessionsMap.get(s.parentID) || [];
@@ -200,8 +203,11 @@ export function Sidebar({
             
             if (parentSessions.length === 0 && subSessionsMap.size === 0)
               return <div style={{ padding: '14px 12px', color: 'var(--text-5)', fontSize: 13 }}>{sessionSearch ? 'No matches' : 'No sessions yet'}</div>;
-            
-            return parentSessions.map(s => (
+
+            const pinnedParents = parentSessions.filter(s => pinnedSessions.has(s.id));
+            const unpinnedParents = parentSessions.filter(s => !pinnedSessions.has(s.id));
+
+            const renderSession = (s: SessionInfo) => (
               <div key={s.id}>
                 <SessionItem
                   session={s}
@@ -210,10 +216,12 @@ export function Sidebar({
                   onClick={() => { switchSession(s.id); setSidebarOpen(false); }}
                   onRename={renameSession}
                   onDelete={deleteSession}
+                  pinned={pinnedSessions.has(s.id)}
+                  onPin={togglePinSession}
                 />
-                {/* Render sub-sessions (indented) */}
+                {/* Sub-sessions follow their parent */}
                 {subSessionsMap.get(s.id)?.map(sub => (
-                  <div key={sub.id} style={{ paddingLeft: 20 }}>
+                  <div key={sub.id} style={{ paddingLeft: 20, borderLeft: '2px solid var(--bg-4)', marginLeft: 12 }}>
                     <SessionItem
                       session={sub}
                       active={sub.id === sessionId}
@@ -226,7 +234,20 @@ export function Sidebar({
                   </div>
                 ))}
               </div>
-            ));
+            );
+
+            return (
+              <>
+                {pinnedParents.length > 0 && (
+                  <>
+                    <div style={{ padding: '6px 12px 2px', fontSize: 10, color: 'var(--accent)', letterSpacing: '0.1em', textTransform: 'uppercase', opacity: 0.7 }}>Pinned</div>
+                    {pinnedParents.map(renderSession)}
+                    {unpinnedParents.length > 0 && <div style={{ height: 1, background: 'var(--bg-3)', margin: '4px 0' }} />}
+                  </>
+                )}
+                {unpinnedParents.map(renderSession)}
+              </>
+            );
           })()}
         </div>
       </div>

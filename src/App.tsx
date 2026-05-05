@@ -165,7 +165,8 @@ function App() {
   
   // Per-session model selections (sessionId -> modelId) - persisted to localStorage
   const LS_SESSION_MODEL_SELECTIONS = 'opencode_session_model_selections';
-  
+  const LS_PINNED_SESSIONS = 'opencode_pinned_sessions';
+
   // Last active session (for auto-restore on refresh)
   const LS_LAST_SESSION = 'oc_last_session';
   const LS_LAST_DIR = 'oc_last_dir';
@@ -192,6 +193,23 @@ function App() {
     }
   };
   const [sessionModelSelections, setSessionModelSelections] = useState<Record<string, string>>(loadSessionModelSelections);
+
+  const loadPinnedSessions = (): Set<string> => {
+    try {
+      const raw = localStorage.getItem(LS_PINNED_SESSIONS);
+      return raw ? new Set(JSON.parse(raw)) : new Set();
+    } catch { return new Set(); }
+  };
+  const [pinnedSessions, setPinnedSessions] = useState<Set<string>>(loadPinnedSessions);
+
+  const togglePinSession = useCallback((id: string) => {
+    setPinnedSessions(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      localStorage.setItem(LS_PINNED_SESSIONS, JSON.stringify([...next]));
+      return next;
+    });
+  }, []);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(!isMobile);
@@ -528,7 +546,7 @@ function App() {
         if (!rec?.info?.id) continue;
         // Stop at the revert boundary — don't show reverted messages
         if (revertMsgID && rec.info.id === revertMsgID) break;
-        msgs.push({ id: rec.info.id, role: rec.info.role, content: '', tokens: rec.info.tokens });
+        msgs.push({ id: rec.info.id, role: rec.info.role, content: '', tokens: rec.info.tokens, model: rec.info.modelID ?? rec.info.model ?? undefined });
         pm[rec.info.id] = rec.parts ?? [];
       }
       setMessages(msgs); setPartsMap(pm);
@@ -974,6 +992,7 @@ function App() {
         busySessions={busySessions}
         sidebarWidth={sidebarWidth}
         sessionSearch={sessionSearch}
+        pinnedSessions={pinnedSessions}
         setSidebarOpen={setSidebarOpen}
         setSidebarWidth={setSidebarWidth}
         setSessionSearch={setSessionSearch}
@@ -983,6 +1002,7 @@ function App() {
         switchDirectory={switchDirectory}
         renameSession={renameSession}
         deleteSession={deleteSession}
+        togglePinSession={togglePinSession}
       />
 
       {/* Main */}
@@ -1292,11 +1312,42 @@ function App() {
                 <div key={`turn-${ti}`} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {allTrailParts.length > 0 && (
                     <div style={{ marginBottom: finalTextMsg ? 6 : 0 }}>
-                      <ToolGroup parts={allTrailParts} isStreaming={turn.msgs.some((m: any) => m.id === streamingMsgId)} />
+                      <ToolGroup
+                        parts={allTrailParts}
+                        isStreaming={turn.msgs.some((m: any) => m.id === streamingMsgId)}
+                        modelName={(() => {
+                          // Use model from the last assistant message that has one
+                          const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
+                          if (!modelId) return undefined;
+                          const found = models.find(m => m.id === modelId);
+                          return found?.name ?? modelId;
+                        })()}
+                        providerName={(() => {
+                          const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
+                          if (!modelId) return undefined;
+                          return models.find(m => m.id === modelId)?.providerName;
+                        })()}
+                      />
                     </div>
                   )}
                   {finalTextMsg && (
-                    <ChatMessage msg={finalTextMsg} parts={finalTailTextParts.length > 0 ? finalTailTextParts : (partsMap[finalTextMsg.id] ?? []).filter((p: any) => p.type === 'text')} isStreaming={finalTextMsg.id === streamingMsgId} onFork={forkSession} hideTools />
+                    <ChatMessage
+                      msg={finalTextMsg}
+                      parts={finalTailTextParts.length > 0 ? finalTailTextParts : (partsMap[finalTextMsg.id] ?? []).filter((p: any) => p.type === 'text')}
+                      isStreaming={finalTextMsg.id === streamingMsgId}
+                      hideTools
+                      modelName={(() => {
+                        const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
+                        if (!modelId) return undefined;
+                        const found = models.find(m => m.id === modelId);
+                        return found?.name ?? modelId;
+                      })()}
+                      providerName={(() => {
+                        const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
+                        if (!modelId) return undefined;
+                        return models.find(m => m.id === modelId)?.providerName;
+                      })()}
+                    />
                   )}
                 </div>
               );

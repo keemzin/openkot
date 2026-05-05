@@ -191,7 +191,7 @@ function ToolRow({ part }: { part: Part }) {
   );
 }
 
-export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming }: { parts: Part[]; isStreaming?: boolean }) {
+export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming, modelName, providerName }: { parts: Part[]; isStreaming?: boolean; modelName?: string; providerName?: string }) {
   const hasJustifications = parts.some(p => p.type === 'text');
   // While streaming → full view. After load/refresh → justifications only (or hidden if none)
   const [view, setView] = useState<'full' | 'justify' | 'hidden'>(
@@ -242,6 +242,20 @@ export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming }: {
         <span style={{ fontSize: '0.75rem', color: 'var(--tools-description)' }}>{chevron}</span>
         {anyRunning && (
           <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 4px var(--accent)', flexShrink: 0 }} />
+        )}
+        {!anyRunning && modelName && (
+          <span style={{
+            display: 'inline-flex', alignItems: 'center', gap: 3,
+            fontSize: '0.75rem', color: 'var(--accent)',
+            background: 'var(--accent-dim)', border: '1px solid rgba(237,180,73,0.25)',
+            borderRadius: 4, padding: '1px 6px',
+          }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7, flexShrink: 0 }}>
+              <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+            </svg>
+            {providerName && <span style={{ opacity: 0.6 }}>{providerName}:</span>}
+            <span style={{ fontWeight: 600 }}>{modelName}</span>
+          </span>
         )}
       </button>
 
