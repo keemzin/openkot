@@ -4,7 +4,7 @@ description: Deep search web + fetch readable content
 agent: build
 ---
 
-Research the topic fast using this workflow: 5 result is enough 
+Research the topic fast using this workflow: 10 result is enough 
 
 1. Use `websearch` to find relevant links with metadata and context
 2. For each promising link, use `fetch_fetch_readable` to extract clean article content

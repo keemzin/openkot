@@ -298,7 +298,7 @@ function App() {
     onSessionIdle: () => loadSessions(),
   });
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, partsMap]);
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, partsMap, permissions, questions]);
 
   // Close model dropdown on outside click
   useEffect(() => {
@@ -1252,7 +1252,7 @@ function App() {
         ) : activeTab !== 'terminal' && (
           /* Chat view ” shown when chat tab is active */
           <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ width: '100%', maxWidth: 760, margin: '0 auto', padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+            <div style={{ width: '100%', maxWidth: 760, margin: '0 auto', padding: '12px 16px 80px', display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
               {messages.length === 0 && (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-4)', gap: 8, paddingTop: 80 }}>
               <svg width="40" height="40" viewBox="0 0 100 100" fill="none" opacity={0.3}>
