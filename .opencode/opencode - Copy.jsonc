@@ -1,0 +1,183 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "*": "allow",
+    "edit": {
+      "*": "ask",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "bash": "ask",
+    "read": {
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.env.example": "allow"
+    },
+    "grep": "ask",
+    "glob": "ask",
+    "list": "ask",
+    "task": "ask",
+    "skill": "ask",
+    "lsp": "ask",
+    "todoread": "ask",
+    "todowrite": "ask",
+    "webfetch": "ask",
+    "websearch": "ask",
+    "codesearch": "ask",
+    "external_directory": "ask",
+    "doom_loop": "ask",
+    "question": "ask"
+  },
+  "mcp": {
+    "chrome-devtools": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "chrome-devtools-mcp@latest"
+      ],
+      "enabled": true
+    },
+    "playwright": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "@playwright/mcp@latest",
+        "--browser=chromium",
+        "--no-sandbox",
+        "--isolated",
+        "--headless"
+      ],
+      "enabled": false
+    },
+    "searxng": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "mcp-searxng"
+      ],
+      "environment": {
+        "SEARXNG_URL": "https://search.pelangi.vip"
+      },
+      "enabled": false
+    },
+    "fetch": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "mcp-fetch-server"
+      ],
+      "enabled": true
+    },
+    "jina": {
+      "type": "remote",
+      "enabled": true,
+      "url": "https://mcp.jina.ai/v1",
+      "headers": {
+        "JINA_API_KEY": "jina_72e5f5acc49e4667877a6abd7ddaca74g6yDqdd-VSFC1iQmy58fZ47NpBw2"
+      }
+    },
+    "sequential-thinking": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "npx",
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "context7": {
+      "type": "local",
+      "enabled": true,
+      "command": [
+        "npx",
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ]
+    }
+  },
+  "provider": {
+    "antigrav": {
+      "name": "antigrav",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "http://localhost:3344/v1/"
+      },
+      "models": {
+        "gpt-oss-120b-medium": {
+          "name": "gpt-oss-120b-medium"
+        },
+        "gemini-3.1-pro-preview": {
+          "name": "gemini-3.1-pro-preview"
+        },
+        "gemini-3-pro-low": {
+          "name": "gemini-3-pro-low"
+        },
+        "gemini-3.1-flash-image": {
+          "name": "gemini-3.1-flash-image"
+        },
+        "gemini-3.1-flash-lite-preview": {
+          "name": "gemini-3.1-flash-lite-preview"
+        },
+        "gemini-3-flash-preview": {
+          "name": "gemini-3-flash-preview"
+        },
+        "gemini-3.1-pro-high": {
+          "name": "gemini-3.1-pro-high"
+        },
+        "gemini-3.1-flash-lite": {
+          "name": "gemini-3.1-flash-lite"
+        },
+        "gemini-2.5-pro": {
+          "name": "gemini-2.5-pro"
+        },
+        "gemini-2.5-flash": {
+          "name": "gemini-2.5-flash"
+        },
+        "claude-opus-4-6-thinking": {
+          "name": "claude-opus-4-6-thinking"
+        },
+        "claude-sonnet-4-6": {
+          "name": "claude-sonnet-4-6"
+        },
+        "gemini-3-pro-preview": {
+          "name": "gemini-3-pro-preview"
+        },
+        "gemini-3.1-pro-low": {
+          "name": "gemini-3.1-pro-low"
+        },
+        "gemini-2.5-flash-lite": {
+          "name": "gemini-2.5-flash-lite"
+        }
+      }
+    },
+    "kilok": {
+      "name": "kilok",
+      "npm": "@ai-sdk/openai-compatible",
+      "options": {
+        "baseURL": "https://api.kilo.ai/api/gateway"
+      },
+      "models": {
+        "kilo-auto/free": {
+          "name": "kilo-auto/free"
+        },
+        "nvidia/nemotron-3-super-120b-a12b:free": {
+          "name": "nvidia/nemotron-3-super-120b-a12b:free"
+        },
+        "x-ai/grok-code-fast-1:optimized:free": {
+          "name": "x-ai/grok-code-fast-1:optimized:free"
+        },
+        "inclusionai/ling-2.6-1t:free": {
+          "name": "inclusionai/ling-2.6-1t:free"
+        },
+        "poolside/laguna-m.1:free": {
+          "name": "poolside/laguna-m.1:free"
+        }
+      }
+    }
+  }
+}

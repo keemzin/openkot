@@ -1148,32 +1148,47 @@ async function start() {
   // createPermissionRoutes is called below after setupProxy(app)
 
   // Config routes — handle locally before proxy
-  const CONFIG_PATH = path.join(PROJECT_ROOT, '.opencode', 'opencode.jsonc');
+  const GLOBAL_CONFIG_PATH = path.join(os.homedir(), '.opencode', 'opencode.jsonc');
+
+  // Resolve the active config path: project-level if it exists, else global.
+  // This mirrors OpenCode's own precedence: project > global.
+  function getConfigPath() {
+    const projectPath = path.join(currentWorkingDir, '.opencode', 'opencode.jsonc');
+    if (fs.existsSync(projectPath)) {
+      return projectPath;
+    }
+    // Fall back to global config
+    return GLOBAL_CONFIG_PATH;
+  }
 
   function parseJsonc(content) {
     return JSON.parse(content);
   }
 
   function readConfig() {
+    const configPath = getConfigPath();
     try {
-      if (!fs.existsSync(CONFIG_PATH)) {
-        console.log('Config file not found at:', CONFIG_PATH);
+      if (!fs.existsSync(configPath)) {
+        console.log('Config file not found at:', configPath);
         return {};
       }
-      const content = fs.readFileSync(CONFIG_PATH, 'utf8');
+      const content = fs.readFileSync(configPath, 'utf8');
       return parseJsonc(content);
     } catch (e) {
-      console.log('Read config error:', e.message, 'at:', CONFIG_PATH);
+      console.log('Read config error:', e.message, 'at:', configPath);
       return {};
     }
   }
 
   async function writeConfig(data) {
+    const configPath = getConfigPath();
     try {
+      // Ensure the directory exists
+      await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
       // Use async writeFile to avoid Bun sync bug on Windows
       const json = JSON.stringify(data, null, 2);
-      await fs.promises.writeFile(CONFIG_PATH, json, 'utf8');
-      console.log('[Config] Successfully wrote config');
+      await fs.promises.writeFile(configPath, json, 'utf8');
+      console.log('[Config] Successfully wrote config to:', configPath);
     } catch (error) {
       console.error('Failed to write config:', error);
       throw error;

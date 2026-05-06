@@ -1165,7 +1165,7 @@ function App() {
               </svg>
             </button>
             {fontPickerOpen && <FontPicker onClose={() => setFontPickerOpen(false)} />}
-            {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} models={models} />}
+            {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} models={models} workingDir={_workingDir} />}
             {/* File tree toggle */}
             <button onClick={() => setRightPanelOpen(o => !o)} title="Toggle file tree"
               style={{ background: 'transparent', border: 'none', color: rightPanelOpen ? 'var(--accent)' : 'var(--text-3)', cursor: 'pointer', padding: '4px 6px', borderRadius: 6, lineHeight: 1, flexShrink: 0 }}>
