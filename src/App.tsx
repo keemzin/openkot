@@ -83,6 +83,23 @@ function App() {
   const [busySessions, setBusySessions] = useState<Set<string>>(new Set());
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [selectedModel, setSelectedModel] = useState<ModelInfo | null>(null);
+
+  // Hidden model IDs — persisted to localStorage, filtered out of ModelSelector
+  const [hiddenModelIds, setHiddenModelIds] = useState<Set<string>>(() => {
+    try {
+      const stored = localStorage.getItem('oc_hidden_models');
+      return stored ? new Set(JSON.parse(stored)) : new Set();
+    } catch { return new Set(); }
+  });
+  const toggleModelVisibility = (modelId: string) => {
+    setHiddenModelIds(prev => {
+      const next = new Set(prev);
+      if (next.has(modelId)) next.delete(modelId);
+      else next.add(modelId);
+      localStorage.setItem('oc_hidden_models', JSON.stringify([...next]));
+      return next;
+    });
+  };
   const [selectedAgent, setSelectedAgent] = useState<'build' | 'plan'>('build');
   const [agentOpen, setAgentOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
@@ -1165,7 +1182,7 @@ function App() {
               </svg>
             </button>
             {fontPickerOpen && <FontPicker onClose={() => setFontPickerOpen(false)} />}
-            {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} models={models} workingDir={_workingDir} />}
+            {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} models={models} workingDir={_workingDir} hiddenModelIds={hiddenModelIds} onToggleModelVisibility={toggleModelVisibility} />}
             {/* File tree toggle */}
             <button onClick={() => setRightPanelOpen(o => !o)} title="Toggle file tree"
               style={{ background: 'transparent', border: 'none', color: rightPanelOpen ? 'var(--accent)' : 'var(--text-3)', cursor: 'pointer', padding: '4px 6px', borderRadius: 6, lineHeight: 1, flexShrink: 0 }}>
@@ -1479,9 +1496,9 @@ function App() {
                   setAgentOpen={setAgentOpen}
                 />
 
-                {/* Model selector */}
+                {/* Model selector — filter out hidden models */}
                 <ModelSelector
-                  models={models}
+                  models={models.filter(m => !hiddenModelIds.has(m.id))}
                   selectedModel={selectedModel}
                   modelOpen={modelOpen}
                   modelSearch={modelSearch}

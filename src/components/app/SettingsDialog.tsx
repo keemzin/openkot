@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import type { ModelInfo } from '../../types';
 import { McpForm } from './McpForm';
 import { usePreferencesStore } from '../../stores/preferencesStore';
-import { getClient } from '../../lib/opencode';
 
 interface McpServer {
   name: string;
@@ -36,6 +35,8 @@ interface SettingsDialogProps {
   onClose: () => void;
   models: ModelInfo[];
   workingDir: string;
+  hiddenModelIds: Set<string>;
+  onToggleModelVisibility: (modelId: string) => void;
 }
 
 // Extracted outside to prevent remounting on parent re-render
@@ -86,8 +87,8 @@ const CommandEditor = ({ command, onSave, onCancel }: { command: Command; onSave
   );
 };
 
-export function SettingsDialog({ onClose, models, workingDir }: SettingsDialogProps) {
-  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'commands' | 'appearance' | 'general'>('mcp');
+export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, onToggleModelVisibility }: SettingsDialogProps) {
+  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'commands' | 'appearance'>('mcp');
   const { streamingMode, setStreamingMode } = usePreferencesStore();
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,17 +121,6 @@ export function SettingsDialog({ onClose, models, workingDir }: SettingsDialogPr
   const [commandLoading, setCommandLoading] = useState(false);
   const [editingCommandDraft, setEditingCommandDraft] = useState<Command | null>(null);
 
-  // General settings tab state
-  const [generalSettings, setGeneralSettings] = useState({
-    shell: '',
-    logLevel: 'info',
-    autoupdate: true,
-    share: 'manual' as 'manual' | 'auto' | 'disabled',
-    snapshot: true,
-    disabledProviders: [] as string[],
-  });
-  const [generalLoading, setGeneralLoading] = useState(false);
-
   // Load config via SDK
   useEffect(() => {
     if (!workingDir) {
@@ -160,13 +150,12 @@ export function SettingsDialog({ onClose, models, workingDir }: SettingsDialogPr
       }
       setLoading(false);
 
-      // Load custom providers via SDK config.providers()
+      // Load custom providers via Express (reads from opencode.jsonc on disk)
       try {
-        const client = await getClient();
-        const provResp = await client.config.providers({ directory: workingDir });
-        const provData = provResp?.data ?? provResp;
-        if (provData?.custom && Array.isArray(provData.custom)) {
-          setCustomProviders(provData.custom);
+        const provResp = await fetch('/api/config/providers/custom');
+        if (provResp.ok) {
+          const provData = await provResp.json();
+          if (Array.isArray(provData)) setCustomProviders(provData);
         }
       } catch (e) {
         console.error('Failed to load providers:', e);
@@ -184,27 +173,6 @@ export function SettingsDialog({ onClose, models, workingDir }: SettingsDialogPr
         console.error('Failed to load commands:', e);
       }
       setCommandLoading(false);
-
-      // Load general settings via SDK
-      setGeneralLoading(true);
-      try {
-        const client = await getClient();
-        const genResp = await client.config.get({ directory: workingDir });
-        const genData = genResp?.data ?? genResp;
-        if (genData) {
-          setGeneralSettings({
-            shell: genData.shell ?? '',
-            logLevel: genData.logLevel ?? 'info',
-            autoupdate: genData.autoupdate ?? true,
-            share: genData.share ?? 'manual',
-            snapshot: genData.snapshot ?? true,
-            disabledProviders: genData.disabled_providers ?? [],
-          });
-        }
-      } catch (e) {
-        console.error('Failed to load general settings:', e);
-      }
-      setGeneralLoading(false);
     };
 
     loadConfig();
@@ -308,35 +276,16 @@ export function SettingsDialog({ onClose, models, workingDir }: SettingsDialogPr
   };
 
   const saveCustomProvider = async (provider: CustomProvider) => {
-    if (!workingDir) {
-      console.error('No working directory');
-      return;
-    }
+    if (!workingDir) return;
 
     try {
-      const client = await getClient();
-      
-      // Get current config first (to preserve other settings)
-      const currentResp = await client.config.get({ directory: workingDir });
-      const currentConfig = (currentResp?.data ?? currentResp) || {};
-      
-      // Build provider config object
-      const providerConfig: Record<string, any> = {};
-      // Get existing from current config
-      if (currentConfig.provider && typeof currentConfig.provider === 'object') {
-        Object.assign(providerConfig, currentConfig.provider);
-      }
-      
-      // Add/update the new provider
-      providerConfig[provider.name] = provider;
-
-      // Merge all config
-      const mergedConfig = { ...currentConfig, provider: providerConfig };
-
-      await client.config.update({
-        directory: workingDir,
-        config: mergedConfig
+      // Save via Express (writes to opencode.jsonc on disk)
+      const resp = await fetch(`/api/config/providers/custom/${encodeURIComponent(provider.name)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(provider),
       });
+      if (!resp.ok) throw new Error(await resp.text());
 
       setCustomProviders(prev => {
         const idx = prev.findIndex(p => p.name === provider.name);
@@ -345,14 +294,12 @@ export function SettingsDialog({ onClose, models, workingDir }: SettingsDialogPr
       });
       setShowAddProvider(false);
       setEditingProvider(null);
-
       setNewProvider({ name: '', displayName: '', npm: '@ai-sdk/openai-compatible', baseUrl: '', apiKey: '', models: [], environment: {} });
       setNewModelInput('');
       setNewEnvInput('');
 
-      // Gracefully reload OpenCode to make new provider available
+      // Restart OpenCode so the new provider is available
       await fetch('/restart', { method: 'POST' });
-      // Poll health endpoint until ready, then reload
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 1000));
         try {
@@ -370,33 +317,11 @@ export function SettingsDialog({ onClose, models, workingDir }: SettingsDialogPr
   };
 
   const deleteCustomProvider = async (name: string) => {
-    if (!workingDir) {
-      console.error('No working directory');
-      return;
-    }
+    if (!workingDir) return;
 
     try {
-      const client = await getClient();
-      
-      // Get current config first (to preserve other settings)
-      const currentResp = await client.config.get({ directory: workingDir });
-      const currentConfig = (currentResp?.data ?? currentResp) || {};
-      
-      // Build provider config without the deleted one
-      const providerConfig: Record<string, any> = {};
-      if (currentConfig.provider && typeof currentConfig.provider === 'object') {
-        Object.assign(providerConfig, currentConfig.provider);
-      }
-      delete providerConfig[name];
-
-      // Merge all config
-      const mergedConfig = { ...currentConfig, provider: providerConfig };
-
-      await client.config.update({
-        directory: workingDir,
-        config: mergedConfig
-      });
-
+      // Delete via Express (writes to opencode.jsonc on disk)
+      await fetch(`/api/config/providers/custom/${encodeURIComponent(name)}`, { method: 'DELETE' });
       setCustomProviders(prev => prev.filter(p => p.name !== name));
     } catch (e) {
       console.error('Failed to delete provider:', e);
@@ -509,18 +434,6 @@ export function SettingsDialog({ onClose, models, workingDir }: SettingsDialogPr
               borderLeft: !isMobile && selectedPage === 'models' ? '2px solid var(--accent)' : 'none',
               borderBottom: isMobile && selectedPage === 'models' ? '2px solid var(--accent)' : 'none'
             }}>Models</button>
-            <button onClick={() => setSelectedPage('general')} style={{
-              width: isMobile ? 'auto' : '100%',
-              padding: isMobile ? '8px 12px' : '8px 16px',
-              background: selectedPage === 'general' ? 'var(--bg-2)' : 'transparent',
-              border: 'none',
-              color: 'var(--text)',
-              fontSize: 14,
-              cursor: 'pointer',
-              textAlign: 'left',
-              borderLeft: !isMobile && selectedPage === 'general' ? '2px solid var(--accent)' : 'none',
-              borderBottom: isMobile && selectedPage === 'general' ? '2px solid var(--accent)' : 'none'
-            }}>General</button>
             <button onClick={() => setSelectedPage('commands')} style={{
               width: isMobile ? 'auto' : '100%',
               padding: isMobile ? '8px 12px' : '8px 16px',
@@ -663,23 +576,93 @@ export function SettingsDialog({ onClose, models, workingDir }: SettingsDialogPr
               <div>
                 {/* Connected models */}
                 <div style={{ marginBottom: 20 }}>
-                  <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 10 }}>Connected Models</h3>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)' }}>Connected Models</h3>
+                    {models.length > 0 && (
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          onClick={() => {
+                            // Show all — clear all hidden
+                            models.forEach(m => { if (hiddenModelIds.has(m.id)) onToggleModelVisibility(m.id); });
+                          }}
+                          style={{ padding: '3px 8px', fontSize: 11, background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer' }}
+                        >Show all</button>
+                        <button
+                          onClick={() => {
+                            // Hide all — hide every visible model
+                            models.forEach(m => { if (!hiddenModelIds.has(m.id)) onToggleModelVisibility(m.id); });
+                          }}
+                          style={{ padding: '3px 8px', fontSize: 11, background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-3)', cursor: 'pointer' }}
+                        >Hide all</button>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 10 }}>Toggle models to show or hide them in the model selector.</div>
                   {models.length === 0 ? (
                     <div style={{ fontSize: 13, color: 'var(--text-3)' }}>No models connected. Use <code>/connect</code> in chat to add a provider.</div>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                      {models.map(m => (
-                        <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', background: 'var(--bg-2)', borderRadius: 4 }}>
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            <div style={{ fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</div>
-                            <div style={{ fontSize: 11, color: 'var(--text-4)' }}>{m.providerId}</div>
-                          </div>
-                          <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
-                            {m.isFree && <span style={{ fontSize: 10, color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid rgba(237,180,73,0.3)', padding: '1px 6px', borderRadius: 4 }}>Free</span>}
-                            {m.isDefault && <span style={{ fontSize: 10, color: 'var(--text-3)', background: 'var(--border)', border: '1px solid var(--border-2)', padding: '1px 6px', borderRadius: 4 }}>Default</span>}
-                          </div>
-                        </div>
-                      ))}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      {(() => {
+                        // Group by provider
+                        const grouped = models.reduce<Record<string, { providerName: string; models: typeof models }>>((acc, m) => {
+                          if (!acc[m.providerId]) acc[m.providerId] = { providerName: m.providerName, models: [] };
+                          acc[m.providerId].models.push(m);
+                          return acc;
+                        }, {});
+
+                        return Object.entries(grouped).map(([providerId, group]) => {
+                          const allHidden = group.models.every(m => hiddenModelIds.has(m.id));
+
+                          return (
+                            <div key={providerId}>
+                              {/* Provider group header */}
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '4px 0', marginBottom: 4, borderBottom: '1px solid var(--border)' }}>
+                                <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                                  {group.providerName}
+                                </span>
+                                <button
+                                  onClick={() => {
+                                    if (allHidden) {
+                                      // Show all in group
+                                      group.models.forEach(m => { if (hiddenModelIds.has(m.id)) onToggleModelVisibility(m.id); });
+                                    } else {
+                                      // Hide all in group
+                                      group.models.forEach(m => { if (!hiddenModelIds.has(m.id)) onToggleModelVisibility(m.id); });
+                                    }
+                                  }}
+                                  style={{ padding: '2px 7px', fontSize: 10, background: 'transparent', border: '1px solid var(--border)', borderRadius: 3, color: 'var(--text-4)', cursor: 'pointer' }}
+                                >
+                                  {allHidden ? 'Show all' : 'Hide all'}
+                                </button>
+                              </div>
+
+                              {/* Models in group */}
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                                {group.models.map(m => {
+                                  const hidden = hiddenModelIds.has(m.id);
+                                  return (
+                                    <div key={m.id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--bg-2)', borderRadius: 4, opacity: hidden ? 0.4 : 1 }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={!hidden}
+                                        onChange={() => onToggleModelVisibility(m.id)}
+                                        style={{ accentColor: 'var(--accent)', flexShrink: 0 }}
+                                      />
+                                      <div style={{ flex: 1, minWidth: 0 }}>
+                                        <div style={{ fontSize: 13, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.name}</div>
+                                      </div>
+                                      <div style={{ display: 'flex', gap: 4, flexShrink: 0 }}>
+                                        {m.isFree && <span style={{ fontSize: 10, color: 'var(--accent)', background: 'var(--accent-dim)', border: '1px solid rgba(237,180,73,0.3)', padding: '1px 6px', borderRadius: 4 }}>Free</span>}
+                                        {m.isDefault && <span style={{ fontSize: 10, color: 'var(--text-3)', background: 'var(--border)', border: '1px solid var(--border-2)', padding: '1px 6px', borderRadius: 4 }}>Default</span>}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        });
+                      })()}
                     </div>
                   )}
                 </div>
@@ -960,149 +943,6 @@ export function SettingsDialog({ onClose, models, workingDir }: SettingsDialogPr
             </button>
             {restartStatus === 'error' && restartError && (
               <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 300 }}>{restartError}</span>
-            )}
-
-            {selectedPage === 'general' && (
-              <div>
-                <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 16 }}>General Settings</h3>
-
-                {generalLoading ? (
-                  <div style={{ fontSize: 13, color: 'var(--text-3)' }}>Loading...</div>
-                ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                    {/* Shell */}
-                    <div style={{ padding: '14px 16px', background: 'var(--bg-2)', borderRadius: 6, border: '1px solid var(--border)' }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>Default Shell</div>
-                      <input
-                        value={generalSettings.shell}
-                        onChange={e => setGeneralSettings(s => ({ ...s, shell: e.target.value }))}
-                        placeholder="e.g., cmd.exe, powershell, bash"
-                        style={{ width: '100%', padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 13 }}
-                      />
-                    </div>
-
-                    {/* Log Level */}
-                    <div style={{ padding: '14px 16px', background: 'var(--bg-2)', borderRadius: 6, border: '1px solid var(--border)' }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>Log Level</div>
-                      <select
-                        value={generalSettings.logLevel}
-                        onChange={e => setGeneralSettings(s => ({ ...s, logLevel: e.target.value }))}
-                        style={{ width: '100%', padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 13 }}
-                      >
-                        <option value="debug">Debug</option>
-                        <option value="info">Info</option>
-                        <option value="warn">Warn</option>
-                        <option value="error">Error</option>
-                      </select>
-                    </div>
-
-                    {/* Auto Update */}
-                    <div style={{ padding: '14px 16px', background: 'var(--bg-2)', borderRadius: 6, border: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div>
-                          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 3 }}>Auto Update</div>
-                          <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Automatically update to latest version</div>
-                        </div>
-                        <button
-                          onClick={() => setGeneralSettings(s => ({ ...s, autoupdate: !s.autoupdate }))}
-                          style={{
-                            width: 44, height: 24, borderRadius: 12,
-                            background: generalSettings.autoupdate ? 'var(--accent)' : 'var(--bg-4)',
-                            border: '1px solid var(--border-2)',
-                            cursor: 'pointer', position: 'relative', transition: 'background 0.2s',
-                            padding: 0,
-                          }}
-                        >
-                          <div style={{
-                            width: 20, height: 20, borderRadius: 10,
-                            background: 'white',
-                            position: 'absolute', top: 1,
-                            left: generalSettings.autoupdate ? 22 : 1,
-                            transition: 'left 0.2s',
-                          }} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Snapshot */}
-                    <div style={{ padding: '14px 16px', background: 'var(--bg-2)', borderRadius: 6, border: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                        <div>
-                          <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 3 }}>Snapshot Tracking</div>
-                          <div style={{ fontSize: 12, color: 'var(--text-3)' }}>Enable filesystem snapshots for undo/redo</div>
-                        </div>
-                        <button
-                          onClick={() => setGeneralSettings(s => ({ ...s, snapshot: !s.snapshot }))}
-                          style={{
-                            width: 44, height: 24, borderRadius: 12,
-                            background: generalSettings.snapshot ? 'var(--accent)' : 'var(--bg-4)',
-                            border: '1px solid var(--border-2)',
-                            cursor: 'pointer', position: 'relative', transition: 'background 0.2s',
-                            padding: 0,
-                          }}
-                        >
-                          <div style={{
-                            width: 20, height: 20, borderRadius: 10,
-                            background: 'white',
-                            position: 'absolute', top: 1,
-                            left: generalSettings.snapshot ? 22 : 1,
-                            transition: 'left 0.2s',
-                          }} />
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* Share */}
-                    <div style={{ padding: '14px 16px', background: 'var(--bg-2)', borderRadius: 6, border: '1px solid var(--border)' }}>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', marginBottom: 8 }}>Sharing</div>
-                      <select
-                        value={generalSettings.share}
-                        onChange={e => setGeneralSettings(s => ({ ...s, share: e.target.value as 'manual' | 'auto' | 'disabled' }))}
-                        style={{ width: '100%', padding: '8px 10px', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 13 }}
-                      >
-                        <option value="manual">Manual - Share via commands</option>
-                        <option value="auto">Auto - Share automatically</option>
-                        <option value="disabled">Disabled - No sharing</option>
-                      </select>
-                    </div>
-
-                    {/* Save button */}
-                    <button
-                      onClick={async () => {
-                        if (!workingDir) return;
-                        try {
-                          const client = await getClient();
-                          
-                          // Get current config first (to preserve other settings)
-                          const currentResp = await client.config.get({ directory: workingDir });
-                          const currentConfig = (currentResp?.data ?? currentResp) || {};
-                          
-                          // Merge general settings with existing config
-                          const mergedConfig = {
-                            ...currentConfig,
-                            shell: generalSettings.shell,
-                            logLevel: generalSettings.logLevel,
-                            autoupdate: generalSettings.autoupdate,
-                            share: generalSettings.share,
-                            snapshot: generalSettings.snapshot,
-                          };
-                          
-                          await client.config.update({
-                            directory: workingDir,
-                            config: mergedConfig
-                          });
-                          console.log('General settings saved');
-                        } catch (e) {
-                          console.error('Failed to save general settings:', e);
-                        }
-                      }}
-                      style={{ padding: '8px 16px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 13 }}
-                    >
-                      Save Settings
-                    </button>
-                  </div>
-                )}
-              </div>
             )}
 
             {selectedPage === 'appearance' && (
