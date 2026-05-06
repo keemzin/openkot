@@ -15,17 +15,23 @@ export function InstancesPanel({ currentPort }: { currentPort: number }) {
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
     try {
-      const r = await fetch('/instances');
+      const r = await fetch('/instances', { signal: controller.signal });
       if (r.ok) {
         setInstances(await r.json());
       } else {
         console.error('Failed to load instances:', r.status);
       }
     } catch (e) {
-      console.error('Failed to load instances:', e);
+      if ((e as Error).name !== 'AbortError') {
+        console.error('Failed to load instances:', e);
+      }
+    } finally {
+      clearTimeout(timer);
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {

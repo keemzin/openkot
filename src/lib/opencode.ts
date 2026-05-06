@@ -16,6 +16,35 @@ export type { OpencodeClient };
 
 let _client: OpencodeClient | null = null;
 
+/** Default connection timeout (ms) for SDK fetch calls. */
+const FETCH_TIMEOUT_MS = 30_000;
+
+/**
+ * Custom fetch that composes the caller's abort signal (from the SDK) with a
+ * 30-second timeout.  When the SDK cancels an SSE stream or the connection
+ * hangs, whichever signal fires first wins — preventing the random hangs
+ * seen during tool-call streaming.
+ */
+const timeoutFetch: typeof fetch = async (input, init) => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+
+  // Compose: caller signal (SDK abort) + our timeout, first one wins.
+  const signals: AbortSignal[] = [controller.signal];
+  if (init?.signal) signals.push(init.signal);
+
+  const composedSignal =
+    typeof AbortSignal.any === 'function'
+      ? AbortSignal.any(signals)
+      : controller.signal; // fallback for older browsers
+
+  try {
+    return await fetch(input, { ...init, signal: composedSignal });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 /**
  * Returns a cached SDK client routed through the Express proxy.
  * Uses window.location.origin so it works from any device on any network.
@@ -30,7 +59,7 @@ export function getClientSync(): OpencodeClient {
     : 'http://localhost:3006/api';
 
   console.log('[opencode] SDK connecting via proxy to', base);
-  _client = createOpencodeClient({ baseUrl: base });
+  _client = createOpencodeClient({ baseUrl: base, fetch: timeoutFetch });
   return _client;
 }
 
