@@ -8,22 +8,22 @@ This is a **web-based UI for OpenCode** — a chat interface that talks to the O
 
 ```
 React Frontend (src/main.tsx)
-     ↓ SDK (direct, port 3358)              ↓ HTTP/WebSocket (via Express proxy)
+     ↓ SDK (via Express proxy /api)         ↓ HTTP/WebSocket (direct handlers)
 OpenCode Binary (vendor/opencode)        Express Server (server/index.js)
-                                              ↓ Direct handlers for:
-                                              /api/fs/*, /api/git/*,
-                                              /api/terminal/*,
-                                              /api/config/*,
-                                              /api/notifications/auto-accept,
-                                              /api/sessions/:id/auto-accept,
-                                              /health, /config, /restart, /switch-dir
+     ↑ SDK responses via proxy             ↑ Direct handlers for:
+                                             /api/fs/*, /api/git/*,
+                                             /api/terminal/*,
+                                             /api/config/*,
+                                             /api/notifications/auto-accept,
+                                             /api/sessions/:id/auto-accept,
+                                             /health, /config, /restart, /switch-dir
 ```
 
 ## Key Architecture Principles
 
 1. **Component-based architecture**: `src/App.tsx` (~1,500 lines) is the main orchestrator; UI components are in `src/components/` (chat, git, filetree, terminal, ui, app). Custom hooks are in `src/hooks/`.
-2. **Local state management**: UI state (theme, sidebar, models, agents, sessions) uses React local state with useState hooks. No external state library is used.
-3. **SDK for OpenCode operations**: All OpenCode-specific API calls (sessions, messages, providers, commands, events, permissions, questions) use `@opencode-ai/sdk` v2 via `src/lib/opencode.ts`.
+2. **Local state management**: UI state (theme, sidebar, models, agents, sessions) uses React local state with useState hooks. Font preferences use zustand store (`src/stores/preferencesStore.ts`).
+3. **SDK for OpenCode operations**: All OpenCode-specific API calls (sessions, messages, providers, commands, events, permissions, questions) use `@opencode-ai/sdk` (package 1.14.x, v2 API) via `src/lib/opencode.ts`, routed through Express proxy.
 4. **Express for custom operations**: Filesystem, git, terminal, MCP config, autopilot/auto-accept logic, and server management stay as Express routes — the SDK does not cover these.
 5. **Bun runtime**: Uses Bun for package management and server runtime (`bun run server`).
 
@@ -34,7 +34,7 @@ OpenCode Binary (vendor/opencode)        Express Server (server/index.js)
 ├── src/
 │   ├── App.tsx              # Main orchestrator (~1,500 lines)
 │   ├── lib/
-│   │   └── opencode.ts      # SDK client singleton (v2, direct to OpenCode port)
+│   │   └── opencode.ts      # SDK client singleton (v2, via Express proxy)
 │   ├── stores/
 │   │   └── preferencesStore.ts # Font preferences (used by FontPicker)
 │   ├── hooks/
@@ -44,6 +44,7 @@ OpenCode Binary (vendor/opencode)        Express Server (server/index.js)
 │   ├── components/
 │   │   ├── app/             # App-level components
 │   │   ├── chat/            # Chat components
+│   │   ├── editor/          # Code editor components
 │   │   ├── git/             # Git components
 │   │   ├── filetree/        # File tree components
 │   │   ├── terminal/        # Terminal components
@@ -58,17 +59,43 @@ OpenCode Binary (vendor/opencode)        Express Server (server/index.js)
 
 ## SDK Integration (`src/lib/opencode.ts`)
 
-The SDK client connects **directly** to the OpenCode binary, bypassing the Express proxy.
+The SDK client (package `@opencode-ai/sdk` v1.14.x, using v2 API imports) connects **through the Express proxy** at `/api`. This ensures cross-origin requests work from any device (localhost, mobile via IP, etc.) because Express is always reachable.
 
 ```typescript
 import { getClient } from './lib/opencode';
 const client = await getClient();
 ```
 
-- Port is read from `/config` at startup (`opencodePort` field) so it works with dynamic port assignment from the CLI.
-- Always connects to `127.0.0.1:{port}` — never the bind address (`0.0.0.0`).
-- Every SDK call passes `{ directory }` explicitly — this replaces the proxy's `x-opencode-directory` header injection.
+- Uses `window.location.origin + '/api'` as base URL, which gets proxied to OpenCode.
+- The Express proxy (`http-proxy-middleware`) forwards to OpenCode and injects the `x-opencode-directory` header.
+- SDK calls still pass `{ directory }` explicitly for operations that need it.
 - OpenCode is spawned with `--cors` flags so the browser can make direct cross-origin requests.
+
+### Config via SDK (Preferred)
+
+Settings now use SDK for config operations. This is more robust as it automatically supports new settings added by OpenCode:
+
+| Operation | SDK Method | Notes |
+|---|---|---|
+| Load MCP config | `client.config.get({ directory })` | Returns `mcp` from config |
+| Save MCP config | `client.config.update({ directory, config: { mcp: {...} } })` | Merges with existing config |
+| Load providers | `client.config.providers({ directory })` | Returns all providers |
+| Save providers | `client.config.update({ directory, config: { provider: {...} } })` | Merges with existing config |
+| Load general settings | `client.config.get({ directory })` | Returns `shell`, `logLevel`, etc. |
+| Save general settings | `client.config.update({ directory, config: {...} })` | Merges all settings |
+
+**Important**: Always merge with existing config before saving:
+```typescript
+// Get current config first
+const current = await client.config.get({ directory });
+const currentData = current?.data ?? current;
+
+// Update with merged config
+await client.config.update({
+  directory,
+  config: { ...currentData, mcp: newMcpConfig }
+});
+```
 
 ### What Uses the SDK (v2)
 
@@ -92,6 +119,9 @@ const client = await getClient();
 | Question reply | `client.question.reply({ requestID, answers, directory })` |
 | Question reject | `client.question.reject({ requestID, directory })` |
 | SSE event stream | `client.event.subscribe({ directory })` → `result.stream` async generator |
+| Get config | `client.config.get({ directory })` |
+| Update config | `client.config.update({ directory, config: {...} })` |
+| List config providers | `client.config.providers({ directory })` |
 
 ### SDK Response Shape
 
@@ -122,13 +152,15 @@ These are custom server-side operations the SDK doesn't cover:
 | Terminal (PTY) | `/api/terminal/*`, `WS /api/terminal/ws` |
 | Autopilot toggle | `/api/notifications/auto-accept` |
 | Session auto-accept lineage | `/api/sessions/:id/auto-accept` |
-| MCP config CRUD | `/api/config/mcp/*` |
-| Custom providers config | `/api/config/providers/custom/*` |
+| MCP config CRUD | `/api/config/mcp/*` (legacy - now SDK preferred) |
+| Custom providers config | `/api/config/providers/custom/*` (legacy - now SDK preferred) |
 | Commands config (editor) | `/api/config/commands/*` |
 | Server health | `/health` |
 | Server config (port, dir) | `/config` |
 | Restart OpenCode | `/restart` |
 | Switch working directory | `/switch-dir` |
+| MCP runtime status | `/api/mcp/status` |
+| MCP connect/disconnect | `/api/mcp/:name/connect`, `/api/mcp/:name/disconnect` |
 
 ## Important Rules
 
@@ -250,6 +282,8 @@ Do not remove these — the build will fail with `process is not defined` or `gl
 - **Model stuck / not switching**: Verify `promptAsync` sends `model: { providerID, modelID }` as a nested object, not flat fields.
 - **UI stuck after bad model**: `promptAsync` is called before `listenToSession` — if the prompt fails, the error is caught and shown immediately without opening a hanging SSE stream.
 - **Restart fails sometimes**: Fixed in `server/index.js` — `currentWorkingDir` is only set AFTER OpenCode starts successfully, not before.
+- **Config settings don't save**: Check that project has `.opencode/opencode.jsonc` config file. SDK reads from project config, not global. If using global config, ensure settings file exists at `~/.opencode/opencode.jsonc` for global or `.opencode/opencode.jsonc` for project.
+- **MCP status shows "Disabled" even when enabled**: Runtime status and config `enabled` are different. Runtime shows actual connection status (connected/stopped/failed), checkbox shows config setting.
 
 ## CLI (`openkot`)
 

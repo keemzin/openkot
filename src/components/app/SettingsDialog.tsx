@@ -89,6 +89,7 @@ const CommandEditor = ({ command, onSave, onCancel }: { command: Command; onSave
 
 export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, onToggleModelVisibility }: SettingsDialogProps) {
   const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'commands' | 'appearance'>('mcp');
+  const [configScope, setConfigScope] = useState<'global' | 'local'>('global');
   const { streamingMode, setStreamingMode } = usePreferencesStore();
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
   const [loading, setLoading] = useState(true);
@@ -133,7 +134,7 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
     const loadConfig = async () => {
       try {
         // Load MCP config via Express (reads from opencode.jsonc on disk)
-        const mcpResp = await fetch('/api/config/mcp');
+        const mcpResp = await fetch(`/api/config/mcp?scope=${configScope}`);
         if (mcpResp.ok) {
           const mcpData = await mcpResp.json();
           if (Array.isArray(mcpData)) {
@@ -152,7 +153,7 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
 
       // Load custom providers via Express (reads from opencode.jsonc on disk)
       try {
-        const provResp = await fetch('/api/config/providers/custom');
+        const provResp = await fetch(`/api/config/providers/custom?scope=${configScope}`);
         if (provResp.ok) {
           const provData = await provResp.json();
           if (Array.isArray(provData)) setCustomProviders(provData);
@@ -176,7 +177,7 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
     };
 
     loadConfig();
-  }, [workingDir]);
+  }, [workingDir, configScope]);
 
   // Fetch MCP runtime status from OpenCode
   const refreshMcpStatus = async () => {
@@ -250,9 +251,8 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
   };
 
   const deleteMcp = async (name: string) => {
-    // Immediately delete from file via Express
     try {
-      await fetch(`/api/config/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      await fetch(`/api/config/mcp/${encodeURIComponent(name)}?scope=${configScope}`, { method: 'DELETE' });
     } catch (e) {
       console.error('Failed to delete MCP server:', e);
     }
@@ -280,7 +280,7 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
 
     try {
       // Save via Express (writes to opencode.jsonc on disk)
-      const resp = await fetch(`/api/config/providers/custom/${encodeURIComponent(provider.name)}`, {
+      const resp = await fetch(`/api/config/providers/custom/${encodeURIComponent(provider.name)}?scope=${configScope}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(provider),
@@ -321,7 +321,7 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
 
     try {
       // Delete via Express (writes to opencode.jsonc on disk)
-      await fetch(`/api/config/providers/custom/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      await fetch(`/api/config/providers/custom/${encodeURIComponent(name)}?scope=${configScope}`, { method: 'DELETE' });
       setCustomProviders(prev => prev.filter(p => p.name !== name));
     } catch (e) {
       console.error('Failed to delete provider:', e);
@@ -367,8 +367,7 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
         const payload = { ...rest, enabled };
         console.log('Saving MCP:', name, 'enabled:', enabled);
 
-        // Use POST to create/replace — idempotent and handles both new and existing servers
-        await fetch(`/api/config/mcp/${encodeURIComponent(name)}`, {
+        await fetch(`/api/config/mcp/${encodeURIComponent(name)}?scope=${configScope}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload),
@@ -395,7 +394,29 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
         borderRadius: isMobile ? 0 : 8, zIndex: 301, display: 'flex', flexDirection: 'column'
       }}>
         <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>Settings</h2>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--text)' }}>Settings</h2>
+            {/* Global / Local scope toggle */}
+            <div style={{ display: 'flex', background: 'var(--bg-2)', borderRadius: 6, padding: 2, gap: 1 }}>
+              {(['global', 'local'] as const).map(scope => (
+                <button
+                  key={scope}
+                  onClick={() => setConfigScope(scope)}
+                  style={{
+                    padding: '3px 10px', fontSize: 11, borderRadius: 4, border: 'none', cursor: 'pointer',
+                    background: configScope === scope ? 'var(--bg-4)' : 'transparent',
+                    color: configScope === scope ? 'var(--text)' : 'var(--text-4)',
+                    fontFamily: 'inherit', textTransform: 'capitalize',
+                  }}
+                >
+                  {scope}
+                </button>
+              ))}
+            </div>
+            <span style={{ fontSize: 11, color: 'var(--text-4)' }}>
+              {configScope === 'global' ? '~/.opencode/opencode.jsonc' : `${workingDir}/.opencode/opencode.jsonc`}
+            </span>
+          </div>
           <button onClick={onClose} style={{ background: 'transparent', border: 'none', color: 'var(--text-4)', cursor: 'pointer', fontSize: 18 }}>✕</button>
         </div>
         <div style={{ flex: 1, display: 'flex', flexDirection: isMobile ? 'column' : 'row', overflow: isMobile ? 'auto' : 'hidden' }}>

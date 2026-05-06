@@ -1150,23 +1150,21 @@ async function start() {
   // Config routes — handle locally before proxy
   const GLOBAL_CONFIG_PATH = path.join(os.homedir(), '.opencode', 'opencode.jsonc');
 
-  // Resolve the active config path: project-level if it exists, else global.
-  // This mirrors OpenCode's own precedence: project > global.
-  function getConfigPath() {
+  // Resolve config path by scope: 'global', 'local', or auto (project > global)
+  function getConfigPath(scope) {
+    if (scope === 'global') return GLOBAL_CONFIG_PATH;
+    if (scope === 'local') return path.join(currentWorkingDir, '.opencode', 'opencode.jsonc');
+    // auto: project-level if it exists, else global
     const projectPath = path.join(currentWorkingDir, '.opencode', 'opencode.jsonc');
-    if (fs.existsSync(projectPath)) {
-      return projectPath;
-    }
-    // Fall back to global config
-    return GLOBAL_CONFIG_PATH;
+    return fs.existsSync(projectPath) ? projectPath : GLOBAL_CONFIG_PATH;
   }
 
   function parseJsonc(content) {
     return JSON.parse(content);
   }
 
-  function readConfig() {
-    const configPath = getConfigPath();
+  function readConfig(scope) {
+    const configPath = getConfigPath(scope);
     try {
       if (!fs.existsSync(configPath)) {
         console.log('Config file not found at:', configPath);
@@ -1180,8 +1178,8 @@ async function start() {
     }
   }
 
-  async function writeConfig(data) {
-    const configPath = getConfigPath();
+  async function writeConfig(data, scope) {
+    const configPath = getConfigPath(scope);
     try {
       // Ensure the directory exists
       await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
@@ -1197,8 +1195,9 @@ async function start() {
 
   app.get('/api/config/mcp', (req, res) => {
     console.log('[API] GET /api/config/mcp');
-    const config = readConfig();
-    console.log('[API] Config loaded:', config);
+    const scope = req.query.scope;
+    const config = readConfig(scope);
+    console.log('[API] Config loaded from scope:', scope || 'auto');
     const mcp = config.mcp || {};
     const servers = Object.entries(mcp).map(([name, cfg]) => ({ name, ...cfg }));
     console.log('[API] MCP servers:', servers);
@@ -1264,7 +1263,8 @@ async function start() {
 
   app.get('/api/config/mcp/:name', (req, res) => {
     const { name } = req.params;
-    const config = readConfig();
+    const scope = req.query.scope;
+    const config = readConfig(scope);
     const server = config.mcp?.[name];
     if (server) {
       res.json({ name, ...server });
@@ -1276,12 +1276,12 @@ async function start() {
   app.post('/api/config/mcp/:name', jsonBody, async (req, res) => {
     try {
       const { name } = req.params;
-      const config = readConfig();
+      const scope = req.query.scope;
+      const config = readConfig(scope);
       config.mcp = config.mcp || {};
       const { name: _, ...serverConfig } = req.body;
       config.mcp[name] = serverConfig;
-      await writeConfig(config);
-      // Reload MCP servers without disrupting UI
+      await writeConfig(config, scope);
       fetch(`http://localhost:${OPENCODE_PORT}/mcp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1297,16 +1297,15 @@ async function start() {
   app.patch('/api/config/mcp/:name', jsonBody, async (req, res) => {
     try {
       const { name } = req.params;
+      const scope = req.query.scope;
       console.log('[API] PATCH /api/config/mcp/' + name, req.body);
-      const config = readConfig();
+      const config = readConfig(scope);
       if (config.mcp?.[name]) {
-        // Remove 'name' field from body before merging (name is the key, not a field)
         const { name: _, ...updates } = req.body;
         const updated = { ...config.mcp[name], ...updates };
         console.log('[API] Updated MCP:', updated);
         config.mcp[name] = updated;
-        await writeConfig(config);
-        // Reload MCP servers without disrupting UI
+        await writeConfig(config, scope);
         fetch(`http://localhost:${OPENCODE_PORT}/mcp`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1325,11 +1324,11 @@ async function start() {
   app.delete('/api/config/mcp/:name', async (req, res) => {
     try {
       const { name } = req.params;
-      const config = readConfig();
+      const scope = req.query.scope;
+      const config = readConfig(scope);
       if (config.mcp?.[name]) {
         delete config.mcp[name];
-        await writeConfig(config);
-        // Reload MCP servers without disrupting UI
+        await writeConfig(config, scope);
         fetch(`http://localhost:${OPENCODE_PORT}/mcp`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -1434,7 +1433,8 @@ ${content}`;
   // Custom providers CRUD — stored in opencode.jsonc under "provider" key
   app.get('/api/config/providers/custom', (req, res) => {
     try {
-      const config = readConfig();
+      const scope = req.query.scope;
+      const config = readConfig(scope);
       const provider = config.provider || {};
       const list = Object.entries(provider).map(([id, cfg]) => ({
         name: id,
@@ -1454,11 +1454,11 @@ ${content}`;
   app.post('/api/config/providers/custom/:name', jsonBody, async (req, res) => {
     try {
       const { name } = req.params;
+      const scope = req.query.scope;
       const { displayName, npm, baseUrl, apiKey, models, environment } = req.body;
-      const config = readConfig();
+      const config = readConfig(scope);
       config.provider = config.provider || {};
 
-      // Build models object: { "model-id": { "name": "model-id" } }
       const modelsObj = {};
       if (Array.isArray(models)) {
         for (const m of models) {
@@ -1475,7 +1475,7 @@ ${content}`;
       };
 
       config.provider[name] = entry;
-      await writeConfig(config);
+      await writeConfig(config, scope);
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: error.message });
@@ -1485,11 +1485,12 @@ ${content}`;
   app.delete('/api/config/providers/custom/:name', async (req, res) => {
     try {
       const { name } = req.params;
-      const config = readConfig();
+      const scope = req.query.scope;
+      const config = readConfig(scope);
       if (config.provider?.[name]) {
         delete config.provider[name];
         if (Object.keys(config.provider).length === 0) delete config.provider;
-        await writeConfig(config);
+        await writeConfig(config, scope);
       }
       res.json({ success: true });
     } catch (error) {

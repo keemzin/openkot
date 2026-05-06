@@ -175,7 +175,7 @@ The CLI overrides these with its own port allocation, so `.env` only matters for
 
 ### OpenCode Config (`.opencode/opencode.jsonc`)
 
-Configure permissions, MCP servers, and providers in `.opencode/opencode.jsonc`. A starter template is available at `.opencode/opencode .jsonc.example` — copy and rename it to get started.
+Configure permissions, MCP servers, and providers in `.opencode/opencode.jsonc`. A starter template is available at `.opencode/opencode.jsonc.example` — copy and rename it to get started.
 
 Key sections:
 - **permission** — Control which tools require approval (edit, bash, read, etc.)
@@ -188,14 +188,18 @@ Key sections:
 
 ```
 React Frontend (src/main.tsx)
-     ↓ SDK (direct, port 3358)              ↓ HTTP/WebSocket (via Express)
+     ↓ SDK (via Express proxy /api)         ↓ HTTP/WebSocket (direct handlers)
 OpenCode Binary (vendor/opencode)        Express Server (server/index.js)
-     ├── Serves dist/ (built React app)
-     ├── Spawns OpenCode binary internally
-     └── Direct handlers: /api/fs/*, /api/git/*, /api/terminal/*, /api/config/*
+     ↑ SDK responses via proxy             ↑ Direct handlers for:
+                                             /api/fs/*, /api/git/*,
+                                             /api/terminal/*,
+                                             /api/config/*,
+                                             /api/notifications/auto-accept,
+                                             /api/sessions/:id/auto-accept,
+                                             /health, /config, /restart, /switch-dir
 ```
 
-OpenCode-specific operations (sessions, messages, permissions, questions) use the SDK to connect directly to the OpenCode binary. Filesystem, git, terminal, and MCP config operations stay as Express routes.
+OpenCode-specific operations (sessions, messages, permissions, questions) use the SDK through the Express proxy at `/api`. Filesystem, git, terminal, and MCP config operations stay as Express routes.
 
 ---
 
