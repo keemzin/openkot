@@ -765,27 +765,40 @@ function App() {
     const text = inputText.trim();
     if (!text || !workingDir) return;
 
-    // ── Interrupt mode: session is busy, inject message without expecting a reply ──
+    // ── Queue mode: session is busy, queue message for processing after current task ──
     if (isLoading) {
       const sid = sessionIdRef.current;
       if (!sid || !selectedModel) return;
       setInputText('');
       if (textareaRef.current) textareaRef.current.style.height = 'auto';
-      // Add to UI as a user message (no assistant placeholder)
+      
+      // Add to UI as a user message
       const tempId = `temp_user_${uid()}`;
       setMessages(prev => [...prev, { id: tempId, role: 'user', content: text }]);
       setPartsMap(prev => ({ ...prev, [tempId]: [{ id: uid(), type: 'text', text }] }));
+      
       try {
         const client = await getClient();
+        // Send as a regular prompt - OpenCode queues it and processes after current task
+        // The SSE listener is already active and will continue receiving updates
         await client.session.promptAsync({
           sessionID: sid,
           directory: getWorkingDir(),
           model: { providerID: selectedModel.providerId, modelID: selectedModel.id },
           parts: [{ type: 'text', text }],
           agent: selectedAgent,
-          noReply: true, // inject mid-run without expecting a new AI reply
         });
-      } catch { /* ignore — interrupt is best-effort */ }
+        console.log('[queue] Message queued, will be processed after current task completes');
+      } catch (err: any) {
+        console.error('[queue] Failed to send:', err);
+        // Remove the optimistic message on error
+        setMessages(prev => prev.filter(m => m.id !== tempId));
+        setPartsMap(prev => {
+          const next = { ...prev };
+          delete next[tempId];
+          return next;
+        });
+      }
       return;
     }
 
@@ -1405,7 +1418,7 @@ function App() {
                 value={inputText}
                 onChange={handleTextareaChange}
                 onKeyDown={handleKeyDown}
-                placeholder={isLoading ? "Interrupt: type to inject a message mid-run…" : "How can I help you today? Type / for commands"}
+                placeholder={isLoading ? "Queue message: type to add to queue after current task…" : "How can I help you today? Type / for commands"}
                 rows={1}
                 style={{
                   width: '100%', background: 'transparent', border: 'none', outline: 'none',
@@ -1514,7 +1527,7 @@ function App() {
                 <button
                   onClick={isLoading && inputText.trim() ? sendMessage : isLoading ? stopGeneration : sendMessage}
                   disabled={!isLoading && !inputText.trim()}
-                  title={isLoading && inputText.trim() ? 'Inject message (interrupt)' : isLoading ? 'Stop generation' : 'Send'}
+                  title={isLoading && inputText.trim() ? 'Queue message (processed after current task)' : isLoading ? 'Stop generation' : 'Send'}
                   style={{
                     background: isLoading && inputText.trim() ? 'var(--accent)' : isLoading ? 'transparent' : (!inputText.trim() ? 'transparent' : 'var(--accent)'),
                     border: 'none',
@@ -1531,7 +1544,7 @@ function App() {
                     /* Stop icon — loading, no text typed */
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
                   ) : isLoading && inputText.trim() ? (
-                    /* Inject/interrupt icon — loading, text typed */
+                    /* Queue icon — loading, text typed */
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
                       <polyline points="13 17 18 12 13 7"/><path d="M6 12h12"/><circle cx="12" cy="12" r="10" strokeWidth="1.5"/>
                     </svg>

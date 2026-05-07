@@ -223,6 +223,13 @@ These are custom server-side operations the SDK doesn't cover:
 ### Package Manager
 - **Always use `bun`** commands: `bun install`, `bun run dev`, `bun run server`.
 
+### Build Command - CRITICAL
+- **NEVER run `bun run build` unless the user explicitly asks for it**
+- `bun run build` updates the production build in `dist/` used by `openkot` CLI
+- During development, only use `bun run dev` (hot reload, no build needed)
+- Running build without permission can break the user's stable `openkot` CLI
+- If you need to test changes, restart `bun run dev`, NOT build
+
 ### Error Handling
 - When code errors occur, ask the user if they want deep inspection using Chrome DevTools for debugging.
 - Proactively offer to use available MCP tools (Context7, sequential-thinking, etc.) to diagnose and fix issues.
@@ -327,7 +334,7 @@ Do not remove these — the build will fail with `process is not defined` or `gl
 - **Shell**: Prefer `cmd.exe` on Windows for better PTY compatibility.
 - **Binary**: If OpenCode fails to start, check `vendor/opencode/` path.
 - **CLI not found**: Run `bun link` from project root, ensure `~/.bun/bin` is in PATH.
-- **Blank UI via CLI**: Run `bun run build` first — CLI serves `dist/` statically.
+- **Blank UI via CLI**: The user needs to run `bun run build` first — CLI serves `dist/` statically. **DO NOT run build yourself** - tell the user to run it.
 - **Bun `WriteFailed` panic on MCP save**: Only happens when server is spawned via `openkot` CLI with `stdio: "pipe"`. Fixed by using `stdio: "inherit"` in `cli/index.ts`. Do NOT revert to piped stdio.
 - **SDK CORS errors**: OpenCode must be spawned with `--cors` flags (done in `server/index.js`). If you see CORS errors, restart the server so OpenCode picks up the flags.
 - **Models not loading**: Only connected providers show models. Check `data.connected` from `provider.list()`. If empty, no API keys are configured.
@@ -347,11 +354,13 @@ The `openkot` CLI starts the full stack (Express server + OpenCode binary) from 
 3. The Express server starts OpenCode internally and serves `dist/` statically
 4. Opens the browser automatically
 
-### Setup
+### Setup (User Only)
 ```bash
-bun run build   # build frontend once
+bun run build   # build frontend once (ONLY run when user requests it)
 bun link        # register openkot globally
 ```
+
+**IMPORTANT**: Agents should NEVER run `bun run build` unless explicitly requested by the user. This updates the production build and can break the user's stable CLI.
 
 ### Entry point
 `cli/index.ts` — compiled/run directly by Bun via the `bin` field in `package.json`.
