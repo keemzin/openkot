@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "concurrently \"vite\" \"bun server/index.js\"",
     "dev:frontend": "vite",
+    "dev:stop": "powershell -ExecutionPolicy Bypass -File dev-stop.ps1",
     "build": "vite build",
     "server": "bun server/index.js",
     "dev:server": "bun server/index.js"

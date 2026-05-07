@@ -1,5 +1,57 @@
 # Agent Guidelines for OpenKot
 
+## Development Workflow
+
+### Starting the Development Server
+
+The server is started with `bun run dev` (always running for development purposes):
+- **Vite dev server**: `http://localhost:5173` (frontend with hot reload)
+- **Express server**: `http://localhost:3006` (backend API)
+- **OpenCode CLI**: port `3358` (AI backend)
+
+**Frontend changes** (files in `src/`) reload **instantly** in the browser - no restart needed!
+
+### When to Restart `bun run dev`
+
+Only restart when:
+1. **Backend changes** (`server/index.js`, Express routes)
+2. **Package changes** (installed new npm package with `bun install`)
+3. **Config changes** (`.env`, `vite.config.ts`)
+4. **Weird errors** (sometimes a fresh restart helps)
+
+### Stopping the Development Server
+
+**Option 1: Ctrl+C** (recommended for the user)
+- Press `Ctrl+C` in the terminal where `bun run dev` is running
+
+**Option 2: Stop script** 
+```bash
+bun run dev:stop
+```
+or
+```bash
+powershell -ExecutionPolicy Bypass -File dev-stop.ps1
+```
+
+### Pro Tips
+
+1. **Keep Terminal Visible** - Watch for errors in the terminal where `bun run dev` is running:
+   ```
+   [0] ✓ built in 123ms
+   [1] [OpenCode] API is ready
+   ```
+
+2. **Self-Healing Development** - You can use OpenKot to fix itself while `bun run dev` is running! Edit files via the UI, and Vite will reload instantly. usualy at port 3007 for first instance.
+
+3. **Port Configuration** - Change ports in `.env`:
+   ```env
+   VITE_PORT=5173      # Vite dev server
+   PORT=3006           # Express server
+   OPENCODE_PORT=3358  # OpenCode CLI
+   ```
+
+4. **See `DEV-GUIDE.md`** for complete development documentation.
+
 ## Project Overview
 
 This project uses **Bun** (not NPM) as its primary runtime and package manager.
