@@ -40,17 +40,17 @@ select option {
 
 /* Tool Group UI - Semantic CSS Variables */
 :root {
-  /* Tool surface colors */
-  --tools-background: #1e1d1d;
-  --tools-border: #3a3838;
-  --tools-header-hover: #2a2828;
-  
+  /* Tool surface colors — use theme vars so they update on theme switch */
+  --tools-background: var(--bg-3);
+  --tools-border: var(--border);
+  --tools-header-hover: var(--bg-4);
+
   /* Tool text colors — reference theme vars so they work in both light and dark */
   --tools-icon: var(--text-3);
   --tools-title: var(--text-2);
   --tools-description: var(--text-4);
-  
-  /* Diff colors */
+
+  /* Diff colors — semantic, keep stable across themes */
   --tools-edit-added: #4ade80;
   --tools-edit-added-bg: rgba(74, 222, 128, 0.15);
   --tools-edit-removed: #f87171;
@@ -58,10 +58,10 @@ select option {
   --tools-edit-modified: #60a5fa;
   --tools-edit-modified-bg: rgba(96, 165, 250, 0.15);
   --tools-edit-line-number: #6b6a69;
-  
-  /* Tool input/output surfaces */
-  --tools-input-surface: #1a1919;
-  --tools-output-surface: #1e1d1d;
+
+  /* Tool input/output surfaces — use theme vars */
+  --tools-input-surface: var(--bg-4);
+  --tools-output-surface: var(--bg-3);
 }
 
 /* Tool card base styles */

@@ -165,7 +165,7 @@ export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStrea
           {/* Reasoning/thinking hidden — too noisy */}
           {hasTools && !hideTools && (
             <div style={{ marginBottom: hasContent ? 6 : 0 }}>
-              <ToolGroup parts={toolParts} />
+              <ToolGroup parts={toolParts} isStreaming={isStreaming} modelName={modelName} providerName={providerName} />
             </div>
           )}
           {(hasContent || isStreaming) && (

@@ -24,7 +24,7 @@ function JustificationRow({ text, defaultOpen }: { text: string; defaultOpen?: b
   const [open, setOpen] = useState(!!defaultOpen);
   const preview = text.trim().replace(/\s+/g, ' ').slice(0, 120);
   return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
+    <div className={`tool-card ${open ? 'expanded' : 'collapsed'}`} style={{ display: 'flex', flexDirection: 'column' }}>
       <div
         role="button"
         onClick={() => setOpen(o => !o)}
@@ -44,17 +44,17 @@ function JustificationRow({ text, defaultOpen }: { text: string; defaultOpen?: b
             {preview}
           </span>
         )}
-        <span style={{ color: 'var(--tools-description)', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
+        <span className="tool-expand-icon" style={{ color: 'var(--tools-description)', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
           <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            {open ? <path d="M6 9l6 6 6-6" /> : <path d="M9 18l6-6-6-6" />}
+            <path d="M9 18l6-6-6-6" />
           </svg>
         </span>
       </div>
-       {open && (
-         <div style={{ paddingLeft: 20, paddingBottom: 6 }}>
-           <Markdown text={text.trim()} />
-         </div>
-       )}
+        {open && (
+          <div style={{ paddingLeft: 20, paddingBottom: 6 }}>
+            <Markdown text={text.trim()} />
+          </div>
+        )}
     </div>
   );
 }
@@ -97,7 +97,7 @@ function ToolRow({ part }: { part: Part }) {
     : desc;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
+    <div className={`tool-card ${open ? 'expanded' : 'collapsed'}`} style={{ display: 'flex', flexDirection: 'column' }}>
       <div
         role={isExpandable ? 'button' : undefined}
         onClick={isExpandable ? () => setOpen(o => !o) : undefined}
@@ -108,11 +108,13 @@ function ToolRow({ part }: { part: Part }) {
           userSelect: 'none',
         }}
       >
-        <span style={{
-          width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
-          background: dotColor,
-          boxShadow: isRunning ? `0 0 4px ${dotColor}` : 'none',
-        }} />
+        <span
+          className={isRunning ? 'tool-running' : undefined}
+          style={{
+            width: 5, height: 5, borderRadius: '50%', flexShrink: 0,
+            background: dotColor,
+          }}
+        />
         <span style={{ color: 'var(--tools-icon)', display: 'inline-flex', alignItems: 'center' }}>
           <ToolIcon toolName={toolName} />
         </span>
@@ -131,7 +133,7 @@ function ToolRow({ part }: { part: Part }) {
         {isExpandable && (
           <span className="tool-expand-icon" style={{ color: 'var(--tools-description)', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}>
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              {open ? <path d="M6 9l6 6 6-6" /> : <path d="M9 18l6-6-6-6" />}
+              <path d="M9 18l6-6-6-6" />
             </svg>
           </span>
         )}
