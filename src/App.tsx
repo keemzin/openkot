@@ -1,18 +1,20 @@
-﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { flushSync } from 'react-dom';
 import { marked } from 'marked';
+
+const RightPanelContent = React.lazy(() => import('./components/app/RightPanelContent').then(m => ({ default: m.RightPanelContent })));
+const SettingsDialog = React.lazy(() => import('./components/app/SettingsDialog').then(m => ({ default: m.SettingsDialog })));
+const DesktopTerminalLazy = React.lazy(() => import('./components/terminal/DesktopTerminal').then(m => ({ default: m.DesktopTerminal })));
+const MobileTerminalLazy = React.lazy(() => import('./components/terminal/MobileTerminal').then(m => ({ default: m.MobileTerminal })));
 import { TokenUsageIndicator } from './components/ui/TokenUsageIndicator';
 import { uid, getContextUsage, fallbackCopy } from './utils/helpers';
 import { useSessionEvents } from './hooks/useSessionEvents';
 import { getClient } from './lib/opencode';
-import { MobileTerminal } from './components/terminal/MobileTerminal';
-import { DesktopTerminal } from './components/terminal/DesktopTerminal';
 import { ChatMessage } from './components/chat/ChatMessage';
 import { ToolGroup } from './components/chat/ToolGroup';
 import { Markdown } from './components/chat/Markdown';
 import { DirPicker } from './components/app/DirPicker';
 import { FontPicker } from './components/app/FontPicker';
-import { SettingsDialog } from './components/app/SettingsDialog';
 import { Sidebar } from './components/Sidebar';
 import { ModelSelector } from './components/ModelSelector';
 import { usePreferencesStore } from './stores/preferencesStore';
@@ -21,9 +23,13 @@ import type { Message, Part, ModelInfo, MessageRecord } from './types';
 function Terminal({ workingDir }: { workingDir: string }) {
   const isMobile = typeof window !== 'undefined' &&
     (window.matchMedia('(pointer: coarse)').matches || /Android|iPhone|iPad/i.test(navigator.userAgent));
-  return isMobile
-    ? <MobileTerminal workingDir={workingDir} />
-    : <DesktopTerminal workingDir={workingDir} />;
+  return (
+    <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-4)', fontSize: 13 }}>Loading terminal...</div>}>
+      {isMobile
+        ? <MobileTerminalLazy workingDir={workingDir} />
+        : <DesktopTerminalLazy workingDir={workingDir} />}
+    </Suspense>
+  );
 }
 
 // Theme System â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -58,7 +64,6 @@ import { PermissionCard, type PermissionRequest } from './components/app/Permiss
 import { SessionItem, type SessionInfo } from './components/app/SessionItem';
 import { PlanView } from './components/app/PlanView';
 import { InstancesPanel } from './components/app/InstancesPanel';
-import { RightPanelContent } from './components/app/RightPanelContent';
 
 const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 
@@ -1195,7 +1200,7 @@ function App() {
               </svg>
             </button>
             {fontPickerOpen && <FontPicker onClose={() => setFontPickerOpen(false)} />}
-            {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} models={models} workingDir={_workingDir} hiddenModelIds={hiddenModelIds} onToggleModelVisibility={toggleModelVisibility} />}
+            {settingsOpen && <Suspense fallback={null}><SettingsDialog onClose={() => setSettingsOpen(false)} models={models} workingDir={_workingDir} hiddenModelIds={hiddenModelIds} onToggleModelVisibility={toggleModelVisibility} /></Suspense>}
             {/* File tree toggle */}
             <button onClick={() => setRightPanelOpen(o => !o)} title="Toggle file tree"
               style={{ background: 'transparent', border: 'none', color: rightPanelOpen ? 'var(--accent)' : 'var(--text-3)', cursor: 'pointer', padding: '4px 6px', borderRadius: 6, lineHeight: 1, flexShrink: 0 }}>
@@ -1565,7 +1570,9 @@ function App() {
       {/* Right panel ” file tree, resizable */}
       {rightPanelOpen && (
         <RightPanel onClose={() => setRightPanelOpen(false)}>
-          <RightPanelContent workingDir={workingDir} />
+          <Suspense fallback={<div style={{ padding: 20, color: 'var(--text-4)', fontSize: 13 }}>Loading...</div>}>
+            <RightPanelContent workingDir={workingDir} />
+          </Suspense>
         </RightPanel>
       )}
 
