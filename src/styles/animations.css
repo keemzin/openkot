@@ -180,3 +180,20 @@ button:active,
     scroll-behavior: auto !important;
   }
 }
+
+/* ── Trail View Transitions ─────────────────────────────── */
+.trail-view {
+  overflow: hidden;
+  transition: opacity 0.3s var(--ease-out-quart),
+              max-height 0.3s var(--ease-out-quart);
+}
+.trail-view.active {
+  opacity: 1;
+  max-height: 5000px;
+  pointer-events: auto;
+}
+.trail-view:not(.active) {
+  opacity: 0;
+  max-height: 0;
+  pointer-events: none;
+}
