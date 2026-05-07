@@ -1,0 +1,182 @@
+/* Animation System — OpenKot "The Living Terminal" */
+
+/* ── Easing Curves (exponential decel, never bounce/elastic) ────────── */
+:root {
+  --ease-out-quart: cubic-bezier(0.25, 1, 0.5, 1);
+  --ease-out-quint: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-out-expo:  cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Button Micro-interactions ─────────────────────────────────────── */
+button,
+[role="button"],
+.ds-btn-primary,
+.ds-btn-ghost,
+.btn,
+input[type="button"],
+input[type="submit"] {
+  transition: background-color 0.2s var(--ease-out-quart),
+              color 0.2s var(--ease-out-quart),
+              transform 0.15s var(--ease-out-quart),
+              box-shadow 0.2s var(--ease-out-quart),
+              border-color 0.2s var(--ease-out-quart);
+}
+
+button:hover,
+[role="button"]:hover,
+.ds-btn-primary:hover,
+.ds-btn-ghost:hover,
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+button:active,
+[role="button"]:active,
+.ds-btn-primary:active,
+.ds-btn-ghost:active,
+.btn:active {
+  transform: translateY(0) scale(0.98);
+  transition-duration: 0.1s;
+}
+
+/* ── Chat Message Entrance ──────────────────────────────────────── */
+.chat-message-new {
+  animation: fadeSlideIn 0.3s var(--ease-out-quart) both;
+}
+
+@keyframes fadeSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Tool Card Expand/Collapse ─────────────────────────────────── */
+.tool-body {
+  overflow: hidden;
+  transition: max-height 0.3s var(--ease-out-quart),
+              opacity 0.2s var(--ease-out-quart);
+}
+
+.tool-card.collapsed .tool-body {
+  max-height: 0;
+  opacity: 0;
+}
+
+.tool-card.expanded .tool-body {
+  max-height: 500px; /* enough for most tool outputs */
+  opacity: 1;
+}
+
+.tool-expand-icon {
+  transition: transform 0.2s var(--ease-out-quint);
+  display: inline-block;
+}
+
+.tool-card.expanded .tool-expand-icon {
+  transform: rotate(180deg);
+}
+
+/* ── Modal / Settings Panel ────────────────────────────────────── */
+.modal-overlay,
+.settings-overlay {
+  animation: fadeIn 0.2s var(--ease-out-quart) both;
+}
+
+.modal-content,
+.settings-panel {
+  animation: slideIn 0.25s var(--ease-out-quint) both;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -48%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+/* Mobile bottom sheet variant */
+@media (max-width: 767px) {
+  .settings-panel,
+  .modal-content {
+    animation: slideUp 0.25s var(--ease-out-quint) both;
+  }
+
+  @keyframes slideUp {
+    from {
+      opacity: 0;
+      transform: translateY(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+/* ── Copy/Save Confirmation Flash ──────────────────────────────── */
+.confirm-flash {
+  animation: confirmPulse 0.4s var(--ease-out-quart) both;
+}
+
+@keyframes confirmPulse {
+  0%   { color: var(--text-3); }
+  50%  { color: var(--green); transform: scale(1.05); }
+  100% { color: var(--text-3); transform: scale(1); }
+}
+
+/* ── Running Indicator Pulse ───────────────────────────────────── */
+.tool-running {
+  animation: pulse 1.5s var(--ease-out-quart) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 4px var(--accent); }
+  50%      { opacity: 0.6; box-shadow: 0 0 8px var(--accent); }
+}
+
+/* ── Token Usage Bar ───────────────────────────────────────────── */
+.token-bar-fill {
+  transition: width 0.3s var(--ease-out-quart);
+}
+
+/* ── Sidebar Resize Handle ─────────────────────────────────────── */
+.sidebar-resize-handle {
+  transition: background-color 0.15s var(--ease-out-quart);
+}
+
+.sidebar-resize-handle:hover {
+  background-color: var(--accent) !important;
+}
+
+/* ── Focus Visible (keyboard users) ───────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  transition: outline-offset 0.15s var(--ease-out-quart);
+}
+
+/* ── Reduced Motion Override ───────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

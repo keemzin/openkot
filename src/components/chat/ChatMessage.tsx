@@ -63,7 +63,7 @@ export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStrea
   // Action buttons — always visible, no hover required
   const actionBtns = !isStreaming && hasContent ? (
     <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-      <button onClick={copyText} title="Copy message" style={{
+      <button onClick={copyText} title="Copy message" className={copied ? 'confirm-flash' : undefined} style={{
         width: 24, height: 24, display: 'flex', alignItems: 'center', justifyContent: 'center',
         background: 'transparent', border: 'none', cursor: 'pointer', borderRadius: 4,
         color: copied ? 'var(--green)' : 'var(--border-2)', transition: 'color 0.1s',
@@ -139,7 +139,7 @@ export const ChatMessage = React.memo(function ChatMessage({ msg, parts, isStrea
     : textContent;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 2 }}>
+    <div className={isStreaming ? 'chat-message-new' : undefined} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 2 }}>
       {isUser && hasContent && (
         <div style={{
           maxWidth: '85%', padding: '9px 13px',

@@ -385,10 +385,11 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
   return (
     <>
       <div
+        className="settings-overlay"
         onClick={onClose}
         style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 300 }}
       />
-      <div style={{
+      <div className="settings-panel" style={{
         position: 'fixed', top: isMobile ? 0 : '50%', left: isMobile ? 0 : '50%', transform: isMobile ? 'none' : 'translate(-50%, -50%)',
         width: isMobile ? '100%' : 800, height: isMobile ? '100%' : 600, background: 'var(--bg)', border: isMobile ? 'none' : '1px solid var(--border)',
         borderRadius: isMobile ? 0 : 8, zIndex: 301, display: 'flex', flexDirection: 'column'
