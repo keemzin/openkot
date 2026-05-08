@@ -1195,6 +1195,40 @@ async function start() {
     res.json([]);
   });
 
+  // Symbol search — LSP-powered symbol search via OpenCode
+  app.get('/api/fs/search-symbols', async (req, res) => {
+    const dir = typeof req.query.dir === 'string' ? req.query.dir : WORKING_DIR;
+    const query = typeof req.query.q === 'string' ? req.query.q : '';
+    if (!query) return res.json([]);
+
+    if (isOpenCodeReady) {
+      try {
+        const url = `http://${OPENCODE_HOST}:${OPENCODE_PORT}/find/symbol?directory=${encodeURIComponent(dir)}&query=${encodeURIComponent(query)}`;
+        const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (response.ok) {
+          const symbols = await response.json();
+          const dirNorm = dir.replace(/\\/g, '/');
+          const results = symbols.map(s => {
+            const uri = s.location?.uri || '';
+            const pathPart = uri.replace(/^file:\/\//, '').replace(/\\/g, '/');
+            const normPath = process.platform === 'win32' ? pathPart.replace(/^\/([A-Za-z]):/, '$1:') : pathPart;
+            const name = s.name || '';
+            const relativePath = normPath.startsWith(dirNorm + '/') ? normPath.slice(dirNorm.length + 1) : normPath;
+            return {
+              name,
+              path: normPath,
+              relativePath,
+              kind: s.kind ?? 0,
+              line_number: (s.location?.range?.start?.line ?? 0) + 1,
+            };
+          });
+          return res.json(results);
+        }
+      } catch { /* empty results */ }
+    }
+    res.json([]);
+  });
+
   // Permission routes (modular - matches OpenChamber pattern)
   // Must be registered AFTER setupProxy so they aren't intercepted by the proxy
   // createPermissionRoutes is called below after setupProxy(app)
