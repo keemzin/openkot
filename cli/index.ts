@@ -294,7 +294,7 @@ async function cmdUpdate(opts: { branch?: string }) {
     console.log('🔒 These will NOT be replaced:');
     console.log('  • .opencode/opencode.jsonc  (gitignored — your MCP config)');
     console.log('  • .env                       (gitignored — your ports/settings)');
-    console.log('  • vendor/                    (gitignored — opencode binary)\n');
+    console.log('  • node_modules/               (reinstall with `bun install`)\n');
 
     // Ask user
     process.stdout.write('Proceed with update? (y/N): ');

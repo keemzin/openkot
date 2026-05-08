@@ -33,8 +33,8 @@
     "chrome-devtools": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
+        "bun",
+        "x",
         "chrome-devtools-mcp@latest"
       ],
       "enabled": false
@@ -42,8 +42,8 @@
     "playwright": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
+        "bun",
+        "x",
         "@playwright/mcp@latest",
         "--browser=chromium",
         "--no-sandbox",
@@ -55,8 +55,8 @@
     "searxng": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
+        "bun",
+        "x",
         "mcp-searxng"
       ],
       "environment": {
@@ -67,8 +67,8 @@
     "fetch": {
       "type": "local",
       "command": [
-        "npx",
-        "-y",
+        "bun",
+        "x",
         "mcp-fetch-server"
       ],
       "enabled": false
@@ -85,8 +85,8 @@
       "type": "local",
       "enabled": true,
       "command": [
-        "npx",
-        "-y",
+        "bun",
+        "x",
         "@modelcontextprotocol/server-sequential-thinking"
       ]
     },
@@ -94,8 +94,8 @@
       "type": "local",
       "enabled": true,
       "command": [
-        "npx",
-        "-y",
+        "bun",
+        "x",
         "@upstash/context7-mcp@latest"
       ]
     }
