@@ -39,17 +39,16 @@ const fetchSessionParentId = async (sessionId, fetchFn) => {
   if (cached !== undefined) return cached;
 
   try {
-    const response = await fetchFn(`/session`, {
+    const response = await fetchFn(`/session/${encodeURIComponent(sessionId)}`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(2000),
     });
     if (!response.ok) return undefined;
-    const data = await response.json().catch(() => null);
-    if (!Array.isArray(data)) return undefined;
+    const session = await response.json().catch(() => null);
+    if (!session || typeof session !== 'object') return undefined;
 
-    const match = data.find((session) => session && typeof session === 'object' && session.id === sessionId);
-    const parentID = match?.parentID ? match.parentID : null;
+    const parentID = session.parentID ? session.parentID : null;
     setCachedSessionParentId(sessionId, parentID);
     return parentID;
   } catch {
