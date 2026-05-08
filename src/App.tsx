@@ -279,6 +279,8 @@ function App() {
   const [questions, setQuestions] = useState<Record<string, QuestionRequest[]>>({});
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sessionIdRef = useRef<string | null>(null);
 
@@ -303,7 +305,21 @@ function App() {
     onSessionIdle: () => loadSessions(),
   });
 
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages, partsMap, permissions, questions]);
+  // Track scroll position — don't auto-scroll if user scrolled up
+  const handleChatScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const threshold = 70;
+    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+  }, []);
+
+  // Smart auto-scroll: only force to bottom when near bottom or for permissions/questions
+  useEffect(() => {
+    const hasPermissions = Object.values(permissions).some(arr => arr.length > 0);
+    const hasQuestions = Object.values(questions).some(arr => arr.length > 0);
+    if (isNearBottomRef.current || hasPermissions || hasQuestions) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, partsMap, permissions, questions]);
 
   // Close model dropdown on outside click
   useEffect(() => {
@@ -1269,7 +1285,7 @@ function App() {
           <InstancesPanel currentPort={window.location.port ? parseInt(window.location.port) : 80} />
         ) : activeTab !== 'terminal' && (
           /* Chat view ” shown when chat tab is active */
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+          <div ref={chatContainerRef} onScroll={handleChatScroll} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
             <div style={{ width: '100%', maxWidth: 760, margin: '0 auto', padding: '12px 16px 80px', display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
               {messages.length === 0 && (
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-4)', gap: 8, paddingTop: 80 }}>

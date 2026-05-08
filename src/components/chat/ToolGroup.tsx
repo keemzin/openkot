@@ -251,9 +251,8 @@ export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming, mod
         title={`Trail view: ${view}. Click to cycle: Full → Justify → Hidden`}
         onClick={cycle}
         style={{
-          position: 'sticky', top: 0, zIndex: 1,
           display: 'flex', alignItems: 'center', gap: 6,
-          background: 'var(--bg)', border: 'none', cursor: 'pointer',
+          background: 'transparent', border: 'none', cursor: 'pointer',
           fontFamily: 'inherit', padding: '2px 0', marginBottom: view !== 'hidden' ? 4 : 0,
         }}
       >
