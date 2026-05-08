@@ -78,7 +78,7 @@
       "enabled": false,
       "url": "https://mcp.jina.ai/v1",
       "headers": {
-        "JINA_API_KEY": "your_jina_api_key_here"
+        "JINA_API_KEY": ""
       }
     },
     "sequential-thinking": {
