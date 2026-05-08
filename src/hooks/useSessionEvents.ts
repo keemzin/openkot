@@ -222,53 +222,22 @@ export function useSessionEvents({
             break;
           }
 
-          // ── permission.asked (v2 name) ─────────────────────────────────
-          if (type === 'permission.asked') {
-            const permission = p as PermissionRequest;
-            if (!permission?.id || !permission.sessionID) continue;
+           // ── permission.asked (v2 name) ─────────────────────────────────
+           if (type === 'permission.asked') {
+             const permission = p as PermissionRequest;
+             if (!permission?.id || !permission.sessionID) continue;
 
-            const quickCheck = !!sessionAutoAcceptRef.current[permission.sessionID];
-            console.log('permission.asked', { permissionId: permission.id, sessionID: permission.sessionID, quickCheck });
-
-            if (quickCheck) {
-              getClient().then(client => client.permission.reply({
-                requestID: permission.id,
-                reply: 'once',
-                directory: getWorkingDir(),
-              })).catch(() => {});
-            } else {
-              fetch(`/api/sessions/${permission.sessionID}/auto-accept`)
-                .then(r => r.json())
-                .then(data => {
-                  if (data.autoAccept) {
-                    getClient().then(client => client.permission.reply({
-                      requestID: permission.id,
-                      reply: 'once',
-                      directory: getWorkingDir(),
-                    })).catch(() => {});
-                  } else {
-                    onPermissionsUpdate(prev => {
-                      const existing = prev[permission.sessionID] ?? [];
-                      const idx = existing.findIndex(pp => pp.id === permission.id);
-                      const next = [...existing];
-                      if (idx >= 0) next[idx] = permission;
-                      else next.push(permission);
-                      return { ...prev, [permission.sessionID]: next };
-                    });
-                  }
-                })
-                .catch(() => {
-                  onPermissionsUpdate(prev => {
-                    const existing = prev[permission.sessionID] ?? [];
-                    const idx = existing.findIndex(pp => pp.id === permission.id);
-                    const next = [...existing];
-                    if (idx >= 0) next[idx] = permission;
-                    else next.push(permission);
-                    return { ...prev, [permission.sessionID]: next };
-                  });
-                });
-            }
-            continue;
+             // Always show permission card to user (autopilot disabled)
+             console.log('permission.asked', { permissionId: permission.id, sessionID: permission.sessionID, autopilotDisabled: true });
+             onPermissionsUpdate(prev => {
+               const existing = prev[permission.sessionID] ?? [];
+               const idx = existing.findIndex(pp => pp.id === permission.id);
+               const next = [...existing];
+               if (idx >= 0) next[idx] = permission;
+               else next.push(permission);
+               return { ...prev, [permission.sessionID]: next };
+             });
+             continue;
           }
 
           // ── permission.replied ─────────────────────────────────────────

@@ -12,9 +12,9 @@ import os from 'os';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
-// Import permission module (matches OpenChamber pattern)
+// Import permission module (matches OpenChamber pattern) - autopilot functionality removed
 const permissionModule = await import('./permission.js');
-const { createPermissionRoutes } = permissionModule;
+// const { createPermissionRoutes } = permissionModule; // autopilot routes removed
 
 // ── Load .env ──────────────────────────────────────────────────────────────
 const envPath = path.join(PROJECT_ROOT, '.env');
@@ -1597,8 +1597,8 @@ ${content}`;
 
   setupProxy(app);
 
-  // Permission routes — registered after proxy but pathFilter excludes them
-  createPermissionRoutes(app, { OPENCODE_HOST, OPENCODE_PORT });
+   // Permission routes — registered after proxy but pathFilter excludes them
+   // createPermissionRoutes(app, { OPENCODE_HOST, OPENCODE_PORT }); // autopilot routes removed
 
   // Serve built frontend in production (when dist/ exists)
   const distPath = path.join(PROJECT_ROOT, 'dist');

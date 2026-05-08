@@ -119,36 +119,18 @@ function App() {
   useEffect(() => { sessionAutoAcceptRef.current = sessionAutoAccept; }, [sessionAutoAccept]);
   useEffect(() => { localStorage.setItem(LS_AUTO_ACCEPT, JSON.stringify(sessionAutoAccept)); }, [sessionAutoAccept]);
 
-  // Helper to check if current session has auto-accept enabled
-  // Falls back to pending state when no session exists yet
-  const isCurrentSessionAutoAccept = () => {
-    if (sessionId) return !!sessionAutoAccept[sessionId];
-    return !!sessionAutoAccept[PENDING_SESSION_KEY];
-  };
+   // Helper to check if current session has auto-accept enabled
+   // Autopilot feature coming soon - always returns false for now
+   const isCurrentSessionAutoAccept = () => {
+     return false; // Autopilot feature coming soon
+   };
 
-  // Toggle auto-accept for current session (or pending state for new sessions)
-  const toggleAutoAccept = () => {
-    const key = sessionId ?? PENDING_SESSION_KEY;
-    const next = !sessionAutoAccept[key];
-    console.log('toggleAutoAccept', { sessionId: key, next });
-    setSessionAutoAccept(prev => {
-      if (next) {
-        return { ...prev, [key]: true };
-      } else {
-        const { [key]: _, ...rest } = prev;
-        return rest;
-      }
-    });
-    // Only notify server if we have a real session ID
-    if (sessionId) {
-      fetch('/api/notifications/auto-accept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, enabled: next }),
-      }).then(() => console.log('auto-accept sent to server', { sessionId, enabled: next }))
-        .catch(() => {});
-    }
-  };
+   // Toggle auto-accept for current session (or pending state for new sessions)
+   // Coming soon feature - button remains but functionality disabled
+   const toggleAutoAccept = () => {
+     // Feature coming soon - no-op for now
+     console.log('Autopilot feature coming soon');
+   };
   // Permissions - persisted to localStorage for recovery after refresh
   const LS_PERMISSIONS = 'oc_permissions';
   const [permissions, setPermissions] = useState<Record<string, PermissionRequest[]>>({});
@@ -772,12 +754,6 @@ function App() {
     setSessionAutoAccept(prev => {
       if (!prev[PENDING_SESSION_KEY]) return prev;
       const { [PENDING_SESSION_KEY]: pending, ...rest } = prev;
-      // Notify server with the real session ID
-      fetch('/api/notifications/auto-accept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: newId, enabled: true }),
-      }).catch(() => {});
       return { ...rest, [newId]: true };
     });
 
@@ -1502,29 +1478,25 @@ function App() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '4px 10px 8px' }}>
               {/* Right: agent selector + model selector + send */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {/* Autopilot toggle */}
-                <button
-                  onClick={toggleAutoAccept}
-                  title={isCurrentSessionAutoAccept() ? "Autopilot: executes tools automatically" : "Permission: asks before executing tools"}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    background: isCurrentSessionAutoAccept() ? 'rgba(74, 157, 95, 0.1)' : 'transparent',
-                    border: isCurrentSessionAutoAccept() ? '1px solid rgba(74, 157, 95, 0.2)' : '1px solid var(--border-2)',
-                    cursor: 'pointer',
-                    padding: '3px 8px', borderRadius: 6,
-                    color: isCurrentSessionAutoAccept() ? '#4a9d5f' : 'var(--text-4)',
-                    fontSize: 11, fontFamily: 'inherit', fontWeight: 500,
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}>
-                    {isCurrentSessionAutoAccept() ? (
-                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                    ) : (
-                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z M12 8v4 M12 16h.01" />
-                    )}
-                  </svg>
-                  {isCurrentSessionAutoAccept() ? 'Autopilot' : 'Permission'}
-                </button>
+                 {/* Permission toggle (autopilot coming soon) */}
+                 <button
+                   onClick={toggleAutoAccept}
+                   title="Permission: asks before executing tools (autopilot coming soon)"
+                   style={{
+                     display: 'flex', alignItems: 'center', gap: 5,
+                     background: 'transparent',
+                     border: '1px solid var(--border-2)',
+                     cursor: 'pointer',
+                     padding: '3px 8px', borderRadius: 6,
+                     color: 'var(--text-4)',
+                     fontSize: 11, fontFamily: 'inherit', fontWeight: 500,
+                   }}
+                 >
+                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}>
+                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z M12 8v4 M12 16h.01" />
+                   </svg>
+                   Permission
+                 </button>
 
                 {/* Agent selector */}
                 <AgentSelector
