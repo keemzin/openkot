@@ -14,7 +14,7 @@ const PROJECT_ROOT = path.resolve(__dirname, '..');
 
 // Import permission module (matches OpenChamber pattern)
 const permissionModule = await import('./permission.js');
-const { createPermissionRoutes, autoAcceptingSessions } = permissionModule;
+const { createPermissionRoutes } = permissionModule;
 
 // ── Load .env ──────────────────────────────────────────────────────────────
 const envPath = path.join(PROJECT_ROOT, '.env');

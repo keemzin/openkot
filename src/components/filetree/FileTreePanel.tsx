@@ -5,8 +5,7 @@ import { ContextMenu } from './ContextMenu';
 import { InlineInput } from './InlineInput';
 import { GitPanel } from '../git/GitPanel';
 import { onOpenFile } from '../../utils/fileOpenListener';
-import type { FsEntry, CtxMenu, InlineEdit, GitStatus, GitFileStatus, ContentSearchResult, SymbolSearchResult } from '../../types';
-import { SYMBOL_KINDS } from '../../types';
+import { SYMBOL_KINDS, type FsEntry, type CtxMenu, type InlineEdit, type GitStatus, type GitFileStatus, type ContentSearchResult, type SymbolSearchResult } from '../../types';
 import { gitStatusColor, gitStatusLabel } from '../../utils/gitUtils';
 import { fileColor, getFileExt } from '../../utils/fileUtils';
 

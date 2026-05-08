@@ -110,10 +110,14 @@ function App() {
   const [modelSearch, setModelSearch] = useState('');
   // Per-session auto-accept (autopilot) state - matches OpenChamber pattern
   // '__pending__' key holds the default for new sessions before they get an ID
+  const LS_AUTO_ACCEPT = 'oc_auto_accept';
   const PENDING_SESSION_KEY = '__pending__';
-  const [sessionAutoAccept, setSessionAutoAccept] = useState<Record<string, boolean>>({});
+  const [sessionAutoAccept, setSessionAutoAccept] = useState<Record<string, boolean>>(() => {
+    try { return JSON.parse(localStorage.getItem(LS_AUTO_ACCEPT) || '{}'); } catch { return {}; }
+  });
   const sessionAutoAcceptRef = useRef<Record<string, boolean>>({});
   useEffect(() => { sessionAutoAcceptRef.current = sessionAutoAccept; }, [sessionAutoAccept]);
+  useEffect(() => { localStorage.setItem(LS_AUTO_ACCEPT, JSON.stringify(sessionAutoAccept)); }, [sessionAutoAccept]);
 
   // Helper to check if current session has auto-accept enabled
   // Falls back to pending state when no session exists yet
