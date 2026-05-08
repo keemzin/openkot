@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { Part } from '../../types';
 import { getToolDisplayName, getToolIconPath, getToolDescription } from '../../utils/toolPresentation';
-import { isDiffTool } from '../../utils/toolCategorization';
+import { isDiffTool, isExpandableTool } from '../../utils/toolCategorization';
 import { ToolPart } from './ToolPart';
 import { Markdown } from './Markdown';
 
@@ -68,8 +68,7 @@ function ToolRow({ part }: { part: Part }) {
   const isDone = state.status === 'completed' || state.status === 'error' || (!state.status && (state.output !== undefined || state.error !== undefined));
 
   const isQuestion = toolName === 'question';
-  const hasExpandableContent = isDiffTool(toolName) || toolName === 'bash' || toolName === 'shell' || toolName === 'cmd' ||
-    toolName === 'write' || toolName === 'create' || toolName === 'file_write';
+  const hasExpandableContent = isExpandableTool(toolName);
   const isExpandable = isQuestion || (hasExpandableContent && isDone);
 
   const label = getToolDisplayName(toolName);
@@ -202,10 +201,28 @@ export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming, mod
   );
   const [showAllJustifications, setShowAllJustifications] = useState(false);
 
-  // Switch to full while streaming, stay there until user manually changes
+  // Track streaming state changes
   const prevStreaming = React.useRef(isStreaming);
+  const hasJustificationsRef = React.useRef(hasJustifications);
+  hasJustificationsRef.current = hasJustifications;
+
+  // Handle streaming state transitions (start/stop)
   React.useEffect(() => {
-    if (isStreaming && !prevStreaming.current) setView('full');
+    // Started streaming
+    if (isStreaming && !prevStreaming.current) {
+      setView('full');
+    }
+
+    // Stopped streaming — auto-collapse after 3s
+    if (!isStreaming && prevStreaming.current) {
+      const timer = setTimeout(() => {
+        setView(hasJustificationsRef.current ? 'justify' : 'hidden');
+      }, 3000);
+
+      prevStreaming.current = isStreaming;
+      return () => clearTimeout(timer);
+    }
+
     prevStreaming.current = isStreaming;
   }, [isStreaming]);
 
@@ -223,12 +240,13 @@ export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming, mod
     return hasJustifications ? 'justify' : 'full';
   });
 
-  const chevron = view === 'full' ? '∧' : view === 'justify' ? '⊟' : '∨';
+  const viewLabel = view === 'full' ? 'Full' : view === 'justify' ? 'Justify' : 'Hidden';
 
   return (
     <div style={{ marginBottom: 4 }}>
       <button
         type="button"
+        title={`Trail view: ${view}. Click to cycle: Full → Justify → Hidden`}
         onClick={cycle}
         style={{
           display: 'flex', alignItems: 'center', gap: 6,
@@ -242,7 +260,7 @@ export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming, mod
           </svg>
         </span>
         <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--tools-title)' }}>Trail</span>
-        <span style={{ fontSize: '0.75rem', color: 'var(--tools-description)' }}>{chevron}</span>
+        <span style={{ fontSize: '0.75rem', color: 'var(--tools-description)', marginLeft: 4 }}>{viewLabel}</span>
         {anyRunning && (
           <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 4px var(--accent)', flexShrink: 0 }} />
         )}

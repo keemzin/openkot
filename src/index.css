@@ -106,16 +106,6 @@ select option {
   margin-left: 2px;
 }
 
-/* Tool running indicator */
-.tool-running {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #22d3ee;
-  box-shadow: 0 0 4px #22d3ee;
-  flex-shrink: 0;
-}
-
 /* Tool expanded item */
 .tool-item {
   display: flex;
