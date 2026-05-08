@@ -474,6 +474,36 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
     onClose();
   };
 
+  // Restart OpenCode and re-fetch provider list — needed because auth.json is loaded at startup
+  const restartAndRefreshProviders = async (loadingId: string) => {
+    try { await fetch('/restart', { method: 'POST' }); } catch {}
+    const deadline = Date.now() + 20000;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 1000));
+      try {
+        const res = await fetch('/health');
+        if (res.ok && (await res.json()).isOpenCodeReady) break;
+      } catch {}
+    }
+    try {
+      const client = await getClient();
+      const resp = await client.provider.list({ directory: workingDir });
+      const data = (resp as any)?.data ?? resp;
+      const connectedIds: string[] = data?.connected ?? [];
+      const providersList: any[] = data?.all ?? [];
+      const authResp = await client.provider.auth({ directory: workingDir });
+      const authData = (authResp as any)?.data ?? authResp;
+      setSdkProviders(prev => {
+        const updated = prev.map(p => {
+          const fresh = providersList.find((x: any) => x.id === p.id);
+          return { ...p, connected: connectedIds.includes(p.id), source: fresh?.source ?? p.source, authMethods: authData?.[p.id] ?? p.authMethods };
+        });
+        return [...updated].sort((a, b) => { if (a.connected !== b.connected) return a.connected ? -1 : 1; return a.name.localeCompare(b.name); });
+      });
+    } catch {}
+    setProviderActionLoading(prev => { const n = { ...prev }; delete n[loadingId]; return n; });
+  };
+
   return (
     <>
       <div
@@ -1055,24 +1085,10 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
                          try {
                            const client = await getClient();
                            await client.auth.remove({ providerID: prov.id });
-                           // Re-fetch from SDK to get true state (env vars may keep it connected)
-                           const resp = await client.provider.list({ directory: workingDir });
-                           const data = (resp as any)?.data ?? resp;
-                           const connectedIds: string[] = data?.connected ?? [];
-                           setSdkProviders(prev => {
-                             const updated = prev.map(p => ({
-                               ...p,
-                               connected: connectedIds.includes(p.id),
-                             }));
-                             return [...updated].sort((a, b) => {
-                               if (a.connected !== b.connected) return a.connected ? -1 : 1;
-                               return a.name.localeCompare(b.name);
-                             });
-                           });
+                           await restartAndRefreshProviders(prov.id);
                          } catch (e: any) {
                            console.error('[SDK] Disconnect failed:', e);
                            alert(`Disconnect failed: ${e?.message || 'Unknown error'}`);
-                         } finally {
                            setProviderActionLoading(prev => { const n = { ...prev }; delete n[prov.id]; return n; });
                          }
                        };
@@ -1357,30 +1373,11 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
                              });
                              console.log('[Connect] auth.set response:', setResp);
                              setShowAuthForm(false);
-                             // Re-fetch true state from SDK after saving
-                             const resp = await client.provider.list({ directory: workingDir });
-                             const data = (resp as any)?.data ?? resp;
-                             console.log('[Connect] provider.list after save:', data);
-                             const connectedIds: string[] = data?.connected ?? [];
-                             const providersList: any[] = data?.all ?? [];
-                             setSdkProviders(prev => {
-                               const updated = prev.map(p => {
-                                 const fresh = providersList.find((x: any) => x.id === p.id);
-                                 return {
-                                   ...p,
-                                   connected: connectedIds.includes(p.id),
-                                   source: fresh?.source ?? p.source,
-                                 };
-                               });
-                               return [...updated].sort((a, b) => {
-                                 if (a.connected !== b.connected) return a.connected ? -1 : 1;
-                                 return a.name.localeCompare(b.name);
-                               });
-                             });
+                             // restartAndRefreshProviders handles clearing loading state on success
+                             restartAndRefreshProviders(selectedProvider.id);
                            } catch (e: any) {
                              console.error('[SDK] Auth set failed:', e);
                              alert(`Failed: ${e?.message || 'Unknown error'}`);
-                           } finally {
                              setProviderActionLoading(prev => { const n = { ...prev }; delete n[selectedProvider.id]; return n; });
                            }
                          }}
