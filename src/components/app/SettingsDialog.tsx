@@ -1028,12 +1028,12 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
                        const actionLoading = providerActionLoading[prov.id];
                        const hasApiAuth = prov.authMethods?.some(m => m.type === 'api');
                        const hasOauthAuth = prov.authMethods?.some(m => m.type === 'oauth');
-                       // Always show Connect — even if no authMethods, fall back to generic API key form
-                       const canConnect = true;
+                       // env/config = connected via env var or config file — auth.remove won't stick
+                       const canDisconnect = prov.connected && prov.source === 'api';
+                       const envConnected = prov.connected && (prov.source === 'env' || prov.source === 'config');
 
                        const openConnectModal = () => {
                          setSelectedProvider(prov);
-                         // Pick first auth method, or synthesise a generic API key method
                          const firstMethod = prov.authMethods?.[0] ?? {
                            type: 'api' as const,
                            label: 'API Key',
@@ -1050,12 +1050,38 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
                          setShowAuthForm(true);
                        };
 
+                       const doDisconnect = async () => {
+                         setProviderActionLoading(prev => ({ ...prev, [prov.id]: 'disconnecting' }));
+                         try {
+                           const client = await getClient();
+                           await client.auth.remove({ providerID: prov.id });
+                           // Re-fetch from SDK to get true state (env vars may keep it connected)
+                           const resp = await client.provider.list({ directory: workingDir });
+                           const data = (resp as any)?.data ?? resp;
+                           const connectedIds: string[] = data?.connected ?? [];
+                           setSdkProviders(prev => {
+                             const updated = prev.map(p => ({
+                               ...p,
+                               connected: connectedIds.includes(p.id),
+                             }));
+                             return [...updated].sort((a, b) => {
+                               if (a.connected !== b.connected) return a.connected ? -1 : 1;
+                               return a.name.localeCompare(b.name);
+                             });
+                           });
+                         } catch (e: any) {
+                           console.error('[SDK] Disconnect failed:', e);
+                           alert(`Disconnect failed: ${e?.message || 'Unknown error'}`);
+                         } finally {
+                           setProviderActionLoading(prev => { const n = { ...prev }; delete n[prov.id]; return n; });
+                         }
+                       };
+
                        return (
                          <div key={prov.id} style={{ borderRadius: 4, border: `1px solid ${prov.connected ? 'var(--accent)' : 'var(--border)'}`, overflow: 'hidden' }}>
                            <div style={{ padding: '12px', background: prov.connected ? 'var(--bg-2)' : 'var(--bg)' }}>
                              {/* Header */}
                              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                               {/* Status dot */}
                                <span style={{
                                  width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
                                  background: prov.connected ? 'var(--green)' : 'var(--text-4)',
@@ -1071,51 +1097,32 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
                                }}>
                                  {prov.connected ? 'Connected' : 'Not Connected'}
                                </span>
-                               {/* Connect / Disconnect / Re-auth buttons */}
-                               {prov.connected ? (
+                               {/* Buttons */}
+                               {envConnected ? (
+                                 // Connected via env var — can't remove via UI, show why
+                                 <span title={`Connected via ${prov.source} variable — remove ${prov.env?.[0] ?? 'the env var'} from your environment to disconnect`}
+                                   style={{ fontSize: 11, padding: '2px 7px', borderRadius: 3, color: 'var(--text-4)', border: '1px solid var(--border)', cursor: 'help' }}>
+                                   via {prov.source} var
+                                 </span>
+                               ) : prov.connected ? (
                                  <>
-                                   <button
-                                     disabled={!!actionLoading}
-                                     onClick={openConnectModal}
-                                     style={{ padding: '3px 8px', fontSize: 11, borderRadius: 3, cursor: actionLoading ? 'not-allowed' : 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-3)', opacity: actionLoading ? 0.6 : 1 }}
-                                   >
+                                   <button disabled={!!actionLoading} onClick={openConnectModal}
+                                     style={{ padding: '3px 8px', fontSize: 11, borderRadius: 3, cursor: actionLoading ? 'not-allowed' : 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-3)', opacity: actionLoading ? 0.6 : 1 }}>
                                      Re-auth
                                    </button>
-                                   <button
-                                     disabled={!!actionLoading}
-                                     onClick={async () => {
-                                       setProviderActionLoading(prev => ({ ...prev, [prov.id]: 'disconnecting' }));
-                                       try {
-                                         const client = await getClient();
-                                         await client.auth.remove({ providerID: prov.id });
-                                         setSdkProviders(prev => {
-                                           const updated = prev.map(p => p.id === prov.id ? { ...p, connected: false } : p);
-                                           return [...updated].sort((a, b) => {
-                                             if (a.connected !== b.connected) return a.connected ? -1 : 1;
-                                             return a.name.localeCompare(b.name);
-                                           });
-                                         });
-                                       } catch (e: any) {
-                                         console.error('[SDK] Disconnect failed:', e);
-                                         alert(`Disconnect failed: ${e?.message || 'Unknown error'}`);
-                                       } finally {
-                                         setProviderActionLoading(prev => { const n = { ...prev }; delete n[prov.id]; return n; });
-                                       }
-                                     }}
-                                     style={{ padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading ? 'not-allowed' : 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--red)', opacity: actionLoading ? 0.6 : 1 }}
-                                   >
-                                     {actionLoading === 'disconnecting' ? 'Disconnecting…' : 'Disconnect'}
-                                   </button>
+                                   {canDisconnect && (
+                                     <button disabled={!!actionLoading} onClick={doDisconnect}
+                                       style={{ padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading ? 'not-allowed' : 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--red)', opacity: actionLoading ? 0.6 : 1 }}>
+                                       {actionLoading === 'disconnecting' ? 'Disconnecting…' : 'Disconnect'}
+                                     </button>
+                                   )}
                                  </>
-                               ) : canConnect ? (
-                                 <button
-                                   disabled={!!actionLoading}
-                                   onClick={openConnectModal}
-                                   style={{ padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading ? 'not-allowed' : 'pointer', border: 'none', background: 'var(--accent)', color: 'white', opacity: actionLoading ? 0.6 : 1 }}
-                                 >
+                               ) : (
+                                 <button disabled={!!actionLoading} onClick={openConnectModal}
+                                   style={{ padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading ? 'not-allowed' : 'pointer', border: 'none', background: 'var(--accent)', color: 'white', opacity: actionLoading ? 0.6 : 1 }}>
                                    {actionLoading === 'connecting' ? 'Connecting…' : 'Connect'}
                                  </button>
-                               ) : null}
+                               )}
                              </div>
 
                              {/* Provider meta */}
@@ -1331,20 +1338,40 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
                        <button
                          onClick={async () => {
                            if (!selectedProvider) return;
-                           // Determine the key value — first prompt's value, or 'key' fallback
-                           const firstPromptKey = authMethod.prompts?.[0]?.key ?? 'key';
-                           const keyValue = authValues[firstPromptKey] || authValues['key'] || '';
-                           if (!keyValue.trim()) { alert('Please enter an API key.'); return; }
+                           console.log('[Connect] authValues:', authValues, 'prompts:', authMethod.prompts);
+                           // Collect all prompt values — try every prompt key, then 'key' fallback
+                           const allKeys = authMethod.prompts?.map(p => p.key) ?? ['key'];
+                           const keyValue = allKeys.map(k => authValues[k]).find(v => v?.trim()) || authValues['key'] || '';
+                           console.log('[Connect] resolved keyValue length:', keyValue.length);
+                           if (!keyValue.trim()) {
+                             alert('Please enter an API key.');
+                             return;
+                           }
                            setProviderActionLoading(prev => ({ ...prev, [selectedProvider.id]: 'connecting' }));
                            try {
                              const client = await getClient();
-                             await client.auth.set({
+                             console.log('[Connect] calling auth.set for', selectedProvider.id);
+                             const setResp = await client.auth.set({
                                providerID: selectedProvider.id,
                                auth: { type: 'api', key: keyValue.trim() },
                              });
+                             console.log('[Connect] auth.set response:', setResp);
                              setShowAuthForm(false);
+                             // Re-fetch true state from SDK after saving
+                             const resp = await client.provider.list({ directory: workingDir });
+                             const data = (resp as any)?.data ?? resp;
+                             console.log('[Connect] provider.list after save:', data);
+                             const connectedIds: string[] = data?.connected ?? [];
+                             const providersList: any[] = data?.all ?? [];
                              setSdkProviders(prev => {
-                               const updated = prev.map(p => p.id === selectedProvider.id ? { ...p, connected: true } : p);
+                               const updated = prev.map(p => {
+                                 const fresh = providersList.find((x: any) => x.id === p.id);
+                                 return {
+                                   ...p,
+                                   connected: connectedIds.includes(p.id),
+                                   source: fresh?.source ?? p.source,
+                                 };
+                               });
                                return [...updated].sort((a, b) => {
                                  if (a.connected !== b.connected) return a.connected ? -1 : 1;
                                  return a.name.localeCompare(b.name);
