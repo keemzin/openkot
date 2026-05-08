@@ -107,6 +107,19 @@
       "options": {
         "baseURL": "http://localhost:3344/v1/"
       }
+    },
+    "kilok": {
+      "name": "kilok",
+      "npm": "@ai-sdk/openai",
+      "options": {
+        "baseURL": "https://api.kilo.ai/api/gateway",
+        "apiKey": "anonymous"
+      },
+      "models": {
+        "kilo-auto/free": {
+          "name": "kilo-auto/free"
+        }
+      }
     }
   }
 }
