@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { ModelInfo } from '../../types';
 import { McpForm } from './McpForm';
 import { usePreferencesStore } from '../../stores/preferencesStore';
+import { getClient } from '../../lib/opencode';
 
 interface McpServer {
   name: string;
@@ -88,7 +89,7 @@ const CommandEditor = ({ command, onSave, onCancel }: { command: Command; onSave
 };
 
 export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, onToggleModelVisibility }: SettingsDialogProps) {
-  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'commands' | 'appearance'>('mcp');
+  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'providers' | 'commands' | 'appearance'>('mcp');
   const [configScope, setConfigScope] = useState<'global' | 'local'>('global');
   const { streamingMode, setStreamingMode } = usePreferencesStore();
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
@@ -114,6 +115,39 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
   const [newEnvInput, setNewEnvInput] = useState('');
   const [providerLoading, setProviderLoading] = useState(false);
 
+   // Providers SDK tab state - uses OpenCode SDK directly
+   interface ProviderAuthMethod {
+     type: 'oauth' | 'api';
+     label: string;
+     prompts?: Array<{
+       type: 'text' | 'select';
+       key: string;
+       message: string;
+       placeholder?: string;
+       options?: Array<{ label: string; value: string; hint?: string }>;
+       when?: { key: string; op: 'eq' | 'neq'; value: string };
+     }>;
+   }
+   interface ProviderInfo {
+     id: string;
+     name: string;
+     displayName?: string;
+     connected: boolean;
+     source?: string;
+     env?: string[];
+     authMethods?: ProviderAuthMethod[];
+     models?: Record<string, { id: string; name: string }>;
+     defaultModel?: string;
+   }
+  const [sdkProviders, setSdkProviders] = useState<ProviderInfo[]>([]);
+  const [sdkProvidersLoading, setSdkProvidersLoading] = useState(false);
+  const [selectedProvider, setSelectedProvider] = useState<ProviderInfo | null>(null);
+  const [showAuthForm, setShowAuthForm] = useState(false);
+  const [authMethod, setAuthMethod] = useState<ProviderAuthMethod | null>(null);
+  const [authMethodIndex, setAuthMethodIndex] = useState(0);
+  const [authValues, setAuthValues] = useState<Record<string, string>>({});
+  const [providerActionLoading, setProviderActionLoading] = useState<Record<string, string>>({}); // id → 'connecting'|'disconnecting'
+
   // Commands tab state
   const [commands, setCommands] = useState<Command[]>([]);
   const [showAddCommand, setShowAddCommand] = useState(false);
@@ -122,62 +156,120 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
   const [commandLoading, setCommandLoading] = useState(false);
   const [editingCommandDraft, setEditingCommandDraft] = useState<Command | null>(null);
 
-  // Load config via SDK
-  useEffect(() => {
-    if (!workingDir) {
-      setLoading(false);
-      setProviderLoading(false);
-      setCommandLoading(false);
-      return;
-    }
+   // Load config via SDK
+   useEffect(() => {
+     if (!workingDir) {
+       setLoading(false);
+       setProviderLoading(false);
+       setCommandLoading(false);
+       return;
+     }
 
-    const loadConfig = async () => {
-      try {
-        // Load MCP config via Express (reads from opencode.jsonc on disk)
-        const mcpResp = await fetch(`/api/config/mcp?scope=${configScope}`);
-        if (mcpResp.ok) {
-          const mcpData = await mcpResp.json();
-          if (Array.isArray(mcpData)) {
-            const servers = mcpData.map((cfg: any): McpServer => ({
-              ...cfg,
-              enabled: cfg.enabled !== false, // default to true
-            }));
-            setMcpServers(servers);
-            console.log('Loaded MCP servers:', servers.map((s: McpServer) => `${s.name}: enabled=${s.enabled}`));
-          }
-        }
-      } catch (e) {
-        console.error('Failed to load MCP config:', e);
-      }
-      setLoading(false);
+     const loadConfig = async () => {
+       try {
+         // Load MCP config via Express (reads from opencode.jsonc on disk)
+         const mcpResp = await fetch(`/api/config/mcp?scope=${configScope}`);
+         if (mcpResp.ok) {
+           const mcpData = await mcpResp.json();
+           if (Array.isArray(mcpData)) {
+             const servers = mcpData.map((cfg: any): McpServer => ({
+               ...cfg,
+               enabled: cfg.enabled !== false, // default to true
+             }));
+             setMcpServers(servers);
+             console.log('Loaded MCP servers:', servers.map((s: McpServer) => `${s.name}: enabled=${s.enabled}`));
+           }
+         }
+       } catch (e) {
+         console.error('Failed to load MCP config:', e);
+       }
+       setLoading(false);
 
-      // Load custom providers via Express (reads from opencode.jsonc on disk)
-      try {
-        const provResp = await fetch(`/api/config/providers/custom?scope=${configScope}`);
-        if (provResp.ok) {
-          const provData = await provResp.json();
-          if (Array.isArray(provData)) setCustomProviders(provData);
-        }
-      } catch (e) {
-        console.error('Failed to load providers:', e);
-      }
-      setProviderLoading(false);
+       // Load custom providers via Express (reads from opencode.jsonc on disk)
+       try {
+         const provResp = await fetch(`/api/config/providers/custom?scope=${configScope}`);
+         if (provResp.ok) {
+           const provData = await provResp.json();
+           if (Array.isArray(provData)) setCustomProviders(provData);
+         }
+       } catch (e) {
+         console.error('Failed to load providers:', e);
+       }
+       setProviderLoading(false);
 
-      // Load commands via Express (no SDK equivalent)
-      try {
-        const r = await fetch('/api/config/commands');
-        if (r.ok) {
-          const data = await r.json();
-          if (Array.isArray(data)) setCommands(data);
-        }
-      } catch (e) {
-        console.error('Failed to load commands:', e);
-      }
-      setCommandLoading(false);
-    };
+       // Load commands via Express (no SDK equivalent)
+       try {
+         const r = await fetch('/api/config/commands');
+         if (r.ok) {
+           const data = await r.json();
+           if (Array.isArray(data)) setCommands(data);
+         }
+       } catch (e) {
+         console.error('Failed to load commands:', e);
+       }
+       setCommandLoading(false);
+     };
 
-    loadConfig();
-  }, [workingDir, configScope]);
+     loadConfig();
+   }, [workingDir, configScope]);
+
+  // Load providers via OpenCode SDK - reload when tab is selected
+   useEffect(() => {
+     if (!workingDir || selectedPage !== 'providers') {
+       return;
+     }
+
+     const loadSdkProviders = async () => {
+       setSdkProvidersLoading(true);
+       try {
+         const client = await getClient();
+         console.log('[SDK] Loading providers for dir:', workingDir);
+
+         // GET /provider → { all: Provider[], connected: string[], default: {} }
+         const providersResp = await client.provider.list({ directory: workingDir });
+         const providersData = (providersResp as any)?.data ?? providersResp;
+         console.log('[SDK] Providers raw:', providersData);
+
+         // GET /provider/auth → { [providerID]: ProviderAuthMethod[] }
+         const authResp = await client.provider.auth({ directory: workingDir });
+         const authData = (authResp as any)?.data ?? authResp;
+         console.log('[SDK] Auth methods raw:', authData);
+
+         const providersList: any[] = providersData?.all ?? [];
+         const connectedIds: string[] = providersData?.connected ?? [];
+         const defaultModels: Record<string, string> = providersData?.default ?? {};
+
+         // Transform to our format
+         const transformed: ProviderInfo[] = providersList.map((prov: any) => ({
+           id: prov.id,
+           name: prov.name || prov.id,
+           displayName: prov.name || prov.id,
+           connected: connectedIds.includes(prov.id),
+           source: prov.source,
+           env: prov.env ?? [],
+           authMethods: authData?.[prov.id] ?? [],
+           models: prov.models ?? {},
+           defaultModel: defaultModels[prov.id],
+         }));
+
+         // Sort: connected first, then alphabetically
+         transformed.sort((a, b) => {
+           if (a.connected !== b.connected) return a.connected ? -1 : 1;
+           return a.name.localeCompare(b.name);
+         });
+
+         console.log('[SDK] Transformed providers:', transformed);
+         setSdkProviders(transformed);
+       } catch (e: any) {
+         console.error('[SDK] Failed to load providers:', e?.message || e);
+         setSdkProviders([]);
+       } finally {
+         setSdkProvidersLoading(false);
+       }
+     };
+
+     loadSdkProviders();
+   }, [workingDir, selectedPage]);
 
   // Fetch MCP runtime status from OpenCode
   const refreshMcpStatus = async () => {
@@ -456,6 +548,18 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
               borderLeft: !isMobile && selectedPage === 'models' ? '2px solid var(--accent)' : 'none',
               borderBottom: isMobile && selectedPage === 'models' ? '2px solid var(--accent)' : 'none'
             }}>Models</button>
+            <button onClick={() => setSelectedPage('providers')} style={{
+              width: isMobile ? 'auto' : '100%',
+              padding: isMobile ? '8px 12px' : '8px 16px',
+              background: selectedPage === 'providers' ? 'var(--bg-2)' : 'transparent',
+              border: 'none',
+              color: 'var(--text)',
+              fontSize: 14,
+              cursor: 'pointer',
+              textAlign: 'left',
+              borderLeft: !isMobile && selectedPage === 'providers' ? '2px solid var(--accent)' : 'none',
+              borderBottom: isMobile && selectedPage === 'providers' ? '2px solid var(--accent)' : 'none'
+            }}>Providers</button>
             <button onClick={() => setSelectedPage('commands')} style={{
               width: isMobile ? 'auto' : '100%',
               padding: isMobile ? '8px 12px' : '8px 16px',
@@ -867,10 +971,178 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
                     </div>
                   )}
                 </div>
-              </div>
-            )}
+               </div>
+             )}
 
-            {selectedPage === 'commands' && (
+             {selectedPage === 'providers' && (
+               <div>
+                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                   <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)' }}>AI Providers (SDK)</h3>
+                   <button onClick={async () => {
+                     if (!workingDir) return;
+                     setSdkProvidersLoading(true);
+                     try {
+                       const client = await getClient();
+                       const providersResp = await client.provider.list({ directory: workingDir });
+                       const providersData = (providersResp as any)?.data ?? providersResp;
+                       const authResp = await client.provider.auth({ directory: workingDir });
+                       const authData = (authResp as any)?.data ?? authResp;
+                       const providersList: any[] = providersData?.all ?? [];
+                       const connectedIds: string[] = providersData?.connected ?? [];
+                       const defaultModels: Record<string, string> = providersData?.default ?? {};
+                       const transformed: ProviderInfo[] = providersList.map((prov: any) => ({
+                         id: prov.id,
+                         name: prov.name || prov.id,
+                         displayName: prov.name || prov.id,
+                         connected: connectedIds.includes(prov.id),
+                         source: prov.source,
+                         env: prov.env ?? [],
+                         authMethods: authData?.[prov.id] ?? [],
+                         models: prov.models ?? {},
+                         defaultModel: defaultModels[prov.id],
+                       }));
+                       transformed.sort((a, b) => {
+                         if (a.connected !== b.connected) return a.connected ? -1 : 1;
+                         return a.name.localeCompare(b.name);
+                       });
+                       setSdkProviders(transformed);
+                     } catch (e) {
+                       console.error('[SDK] Refresh failed:', e);
+                     } finally {
+                       setSdkProvidersLoading(false);
+                     }
+                   }} style={{ padding: '4px 8px', background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer', fontSize: 12 }}>Refresh</button>
+                 </div>
+                 <div style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 12 }}>
+                   Manage AI providers via the OpenCode SDK. Connected providers are shown first.
+                 </div>
+
+                 {sdkProvidersLoading ? (
+                   <div style={{ fontSize: 14, color: 'var(--text-3)' }}>Loading providers from OpenCode...</div>
+                 ) : sdkProviders.length === 0 ? (
+                   <div style={{ fontSize: 14, color: 'var(--text-3)' }}>No providers available. Start OpenCode to load providers.</div>
+                 ) : (
+                   <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                     {sdkProviders.map(prov => {
+                       const modelCount = Object.keys(prov.models ?? {}).length;
+                       const actionLoading = providerActionLoading[prov.id];
+                       const hasApiAuth = prov.authMethods?.some(m => m.type === 'api');
+                       const hasOauthAuth = prov.authMethods?.some(m => m.type === 'oauth');
+                       // Always show Connect — even if no authMethods, fall back to generic API key form
+                       const canConnect = true;
+
+                       const openConnectModal = () => {
+                         setSelectedProvider(prov);
+                         // Pick first auth method, or synthesise a generic API key method
+                         const firstMethod = prov.authMethods?.[0] ?? {
+                           type: 'api' as const,
+                           label: 'API Key',
+                           prompts: [{
+                             type: 'text' as const,
+                             key: 'key',
+                             message: prov.env?.[0] ? `${prov.env[0]}` : 'API Key',
+                             placeholder: 'sk-...',
+                           }],
+                         };
+                         setAuthMethod(firstMethod);
+                         setAuthMethodIndex(0);
+                         setAuthValues({});
+                         setShowAuthForm(true);
+                       };
+
+                       return (
+                         <div key={prov.id} style={{ borderRadius: 4, border: `1px solid ${prov.connected ? 'var(--accent)' : 'var(--border)'}`, overflow: 'hidden' }}>
+                           <div style={{ padding: '12px', background: prov.connected ? 'var(--bg-2)' : 'var(--bg)' }}>
+                             {/* Header */}
+                             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                               {/* Status dot */}
+                               <span style={{
+                                 width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                                 background: prov.connected ? 'var(--green)' : 'var(--text-4)',
+                               }} />
+                               <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)', flex: 1 }}>
+                                 {prov.displayName || prov.name}
+                               </span>
+                               <span style={{
+                                 fontSize: 11, padding: '2px 7px', borderRadius: 10,
+                                 color: prov.connected ? 'var(--green)' : 'var(--text-4)',
+                                 background: prov.connected ? 'rgba(80,200,120,0.12)' : 'var(--bg-3)',
+                                 border: `1px solid ${prov.connected ? 'rgba(80,200,120,0.3)' : 'var(--border)'}`,
+                               }}>
+                                 {prov.connected ? 'Connected' : 'Not Connected'}
+                               </span>
+                               {/* Connect / Disconnect / Re-auth buttons */}
+                               {prov.connected ? (
+                                 <>
+                                   <button
+                                     disabled={!!actionLoading}
+                                     onClick={openConnectModal}
+                                     style={{ padding: '3px 8px', fontSize: 11, borderRadius: 3, cursor: actionLoading ? 'not-allowed' : 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--text-3)', opacity: actionLoading ? 0.6 : 1 }}
+                                   >
+                                     Re-auth
+                                   </button>
+                                   <button
+                                     disabled={!!actionLoading}
+                                     onClick={async () => {
+                                       setProviderActionLoading(prev => ({ ...prev, [prov.id]: 'disconnecting' }));
+                                       try {
+                                         const client = await getClient();
+                                         await client.auth.remove({ providerID: prov.id });
+                                         setSdkProviders(prev => {
+                                           const updated = prev.map(p => p.id === prov.id ? { ...p, connected: false } : p);
+                                           return [...updated].sort((a, b) => {
+                                             if (a.connected !== b.connected) return a.connected ? -1 : 1;
+                                             return a.name.localeCompare(b.name);
+                                           });
+                                         });
+                                       } catch (e: any) {
+                                         console.error('[SDK] Disconnect failed:', e);
+                                         alert(`Disconnect failed: ${e?.message || 'Unknown error'}`);
+                                       } finally {
+                                         setProviderActionLoading(prev => { const n = { ...prev }; delete n[prov.id]; return n; });
+                                       }
+                                     }}
+                                     style={{ padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading ? 'not-allowed' : 'pointer', border: '1px solid var(--border)', background: 'transparent', color: 'var(--red)', opacity: actionLoading ? 0.6 : 1 }}
+                                   >
+                                     {actionLoading === 'disconnecting' ? 'Disconnecting…' : 'Disconnect'}
+                                   </button>
+                                 </>
+                               ) : canConnect ? (
+                                 <button
+                                   disabled={!!actionLoading}
+                                   onClick={openConnectModal}
+                                   style={{ padding: '3px 10px', fontSize: 11, borderRadius: 3, cursor: actionLoading ? 'not-allowed' : 'pointer', border: 'none', background: 'var(--accent)', color: 'white', opacity: actionLoading ? 0.6 : 1 }}
+                                 >
+                                   {actionLoading === 'connecting' ? 'Connecting…' : 'Connect'}
+                                 </button>
+                               ) : null}
+                             </div>
+
+                             {/* Provider meta */}
+                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, fontSize: 11, color: 'var(--text-4)' }}>
+                               <span>ID: <code style={{ fontFamily: 'monospace', background: 'var(--bg)', padding: '1px 4px', borderRadius: 3 }}>{prov.id}</code></span>
+                               {modelCount > 0 && <span>{modelCount} model{modelCount !== 1 ? 's' : ''}</span>}
+                               {prov.defaultModel && <span>Default: <code style={{ fontFamily: 'monospace', background: 'var(--bg)', padding: '1px 4px', borderRadius: 3 }}>{prov.defaultModel}</code></span>}
+                             </div>
+
+                             {/* Env vars + auth badges row */}
+                             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 6 }}>
+                               {prov.env?.map(e => (
+                                 <span key={e} style={{ fontSize: 10, padding: '1px 6px', background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 3, color: 'var(--text-4)', fontFamily: 'monospace' }}>{e}</span>
+                               ))}
+                               {hasApiAuth && <span style={{ fontSize: 10, padding: '1px 6px', background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 3, color: 'var(--text-3)' }}>API Key</span>}
+                               {hasOauthAuth && <span style={{ fontSize: 10, padding: '1px 6px', background: 'var(--bg-3)', border: '1px solid var(--border-2)', borderRadius: 3, color: 'var(--text-3)' }}>OAuth</span>}
+                             </div>
+                           </div>
+                         </div>
+                       );
+                     })}
+                   </div>
+                 )}
+               </div>
+             )}
+
+             {selectedPage === 'commands' && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)' }}>Slash Commands</h3>
@@ -909,10 +1181,195 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
                     ))}
                   </div>
                 )}
-              </div>
-            )}
-          </div>        </div>
-        <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+               </div>
+             )}
+           </div>
+         </div>
+
+         {/* Provider Auth Modal */}
+         {showAuthForm && selectedProvider && authMethod && (
+           <div style={{
+             position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000,
+             display: 'flex', alignItems: 'center', justifyContent: 'center'
+           }} onClick={() => setShowAuthForm(false)}>
+             <div style={{
+               background: 'var(--bg)', borderRadius: 8, width: 480, maxWidth: '90%',
+               border: '1px solid var(--border)', boxShadow: '0 8px 32px rgba(0,0,0,0.4)'
+             }} onClick={e => e.stopPropagation()}>
+               <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                 <h3 style={{ fontSize: 15, fontWeight: 600, margin: 0 }}>
+                   Connect {selectedProvider.displayName || selectedProvider.name}
+                 </h3>
+                 <button onClick={() => setShowAuthForm(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-4)', cursor: 'pointer', fontSize: 20, padding: 0, lineHeight: 1 }}>×</button>
+               </div>
+               <div style={{ padding: '16px 20px' }}>
+                 {/* Auth method tabs if multiple */}
+                 {selectedProvider.authMethods && selectedProvider.authMethods.length > 1 && (
+                   <div style={{ marginBottom: 16 }}>
+                     <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>Auth Method</label>
+                     <div style={{ display: 'flex', gap: 6 }}>
+                       {selectedProvider.authMethods.map((m, i) => (
+                         <button key={i}
+                           onClick={() => { setAuthMethod(m); setAuthMethodIndex(i); setAuthValues({}); }}
+                           style={{
+                             padding: '4px 10px', fontSize: 12, borderRadius: 4, cursor: 'pointer',
+                             border: `1px solid ${authMethodIndex === i ? 'var(--accent)' : 'var(--border)'}`,
+                             background: authMethodIndex === i ? 'var(--accent)' : 'transparent',
+                             color: authMethodIndex === i ? 'white' : 'var(--text-3)',
+                           }}
+                         >{m.label}</button>
+                       ))}
+                     </div>
+                   </div>
+                 )}
+
+                 {/* OAuth flow */}
+                 {authMethod.type === 'oauth' ? (
+                   <div>
+                     <p style={{ fontSize: 12, color: 'var(--text-3)', marginBottom: 16 }}>
+                       Click below to open the authorization page in your browser. After approving, come back here.
+                     </p>
+                     {/* Any pre-auth prompts (e.g. enterprise URL) */}
+                     {authMethod.prompts?.filter(p => !p.when || (p.when.op === 'eq' ? authValues[p.when.key] === p.when.value : authValues[p.when.key] !== p.when.value)).map(prompt => (
+                       <div key={prompt.key} style={{ marginBottom: 14 }}>
+                         <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>{prompt.message}</label>
+                         <input
+                           type="text"
+                           value={authValues[prompt.key] || ''}
+                           onChange={e => setAuthValues(prev => ({ ...prev, [prompt.key]: e.target.value }))}
+                           placeholder={'placeholder' in prompt ? prompt.placeholder : undefined}
+                           style={{ width: '100%', padding: '8px 12px', background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 13 }}
+                         />
+                       </div>
+                     ))}
+                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                       <button onClick={() => setShowAuthForm(false)}
+                         style={{ padding: '6px 14px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer', fontSize: 12 }}>
+                         Cancel
+                       </button>
+                       <button
+                         onClick={async () => {
+                           if (!selectedProvider) return;
+                           setProviderActionLoading(prev => ({ ...prev, [selectedProvider.id]: 'connecting' }));
+                           try {
+                             const client = await getClient();
+                             const resp = await client.provider.oauth.authorize({
+                               providerID: selectedProvider.id,
+                               directory: workingDir,
+                               method: authMethodIndex,
+                               inputs: authValues,
+                             });
+                             const data = (resp as any)?.data ?? resp;
+                             if (data?.url) {
+                               window.open(data.url, '_blank');
+                             }
+                             setShowAuthForm(false);
+                           } catch (e: any) {
+                             console.error('[SDK] OAuth authorize failed:', e);
+                             alert(`OAuth failed: ${e?.message || 'Unknown error'}`);
+                           } finally {
+                             setProviderActionLoading(prev => { const n = { ...prev }; delete n[selectedProvider.id]; return n; });
+                           }
+                         }}
+                         style={{ padding: '6px 14px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}
+                       >
+                         Open Authorization Page
+                       </button>
+                     </div>
+                   </div>
+                 ) : (
+                   /* API key flow */
+                   <div>
+                     {authMethod.prompts && authMethod.prompts.length > 0 ? (
+                       authMethod.prompts
+                         .filter(p => !p.when || (p.when.op === 'eq' ? authValues[p.when.key] === p.when.value : authValues[p.when.key] !== p.when.value))
+                         .map(prompt => (
+                           <div key={prompt.key} style={{ marginBottom: 14 }}>
+                             <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>{prompt.message}</label>
+                             {prompt.type === 'select' ? (
+                               <select
+                                 value={authValues[prompt.key] || ''}
+                                 onChange={e => setAuthValues(prev => ({ ...prev, [prompt.key]: e.target.value }))}
+                                 style={{ width: '100%', padding: '8px 12px', background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 13 }}
+                               >
+                                 <option value="">Select...</option>
+                                 {prompt.options?.map(opt => (
+                                   <option key={opt.value} value={opt.value}>{opt.label}{opt.hint ? ` — ${opt.hint}` : ''}</option>
+                                 ))}
+                               </select>
+                             ) : (
+                               <input
+                                 type="password"
+                                 value={authValues[prompt.key] || ''}
+                                 onChange={e => setAuthValues(prev => ({ ...prev, [prompt.key]: e.target.value }))}
+                                 placeholder={'placeholder' in prompt ? prompt.placeholder : undefined}
+                                 style={{ width: '100%', padding: '8px 12px', background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 13 }}
+                               />
+                             )}
+                           </div>
+                         ))
+                     ) : (
+                       /* Fallback: no prompts defined — show a generic API key input */
+                       <div style={{ marginBottom: 14 }}>
+                         <label style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', display: 'block', marginBottom: 6 }}>
+                           API Key{selectedProvider.env?.[0] ? ` (${selectedProvider.env[0]})` : ''}
+                         </label>
+                         <input
+                           type="password"
+                           value={authValues['key'] || ''}
+                           onChange={e => setAuthValues(prev => ({ ...prev, key: e.target.value }))}
+                           placeholder="sk-..."
+                           style={{ width: '100%', padding: '8px 12px', background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text)', fontSize: 13 }}
+                         />
+                       </div>
+                     )}
+                     <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                       <button onClick={() => setShowAuthForm(false)}
+                         style={{ padding: '6px 14px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer', fontSize: 12 }}>
+                         Cancel
+                       </button>
+                       <button
+                         onClick={async () => {
+                           if (!selectedProvider) return;
+                           // Determine the key value — first prompt's value, or 'key' fallback
+                           const firstPromptKey = authMethod.prompts?.[0]?.key ?? 'key';
+                           const keyValue = authValues[firstPromptKey] || authValues['key'] || '';
+                           if (!keyValue.trim()) { alert('Please enter an API key.'); return; }
+                           setProviderActionLoading(prev => ({ ...prev, [selectedProvider.id]: 'connecting' }));
+                           try {
+                             const client = await getClient();
+                             await client.auth.set({
+                               providerID: selectedProvider.id,
+                               auth: { type: 'api', key: keyValue.trim() },
+                             });
+                             setShowAuthForm(false);
+                             setSdkProviders(prev => {
+                               const updated = prev.map(p => p.id === selectedProvider.id ? { ...p, connected: true } : p);
+                               return [...updated].sort((a, b) => {
+                                 if (a.connected !== b.connected) return a.connected ? -1 : 1;
+                                 return a.name.localeCompare(b.name);
+                               });
+                             });
+                           } catch (e: any) {
+                             console.error('[SDK] Auth set failed:', e);
+                             alert(`Failed: ${e?.message || 'Unknown error'}`);
+                           } finally {
+                             setProviderActionLoading(prev => { const n = { ...prev }; delete n[selectedProvider.id]; return n; });
+                           }
+                         }}
+                         style={{ padding: '6px 14px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer', fontSize: 12 }}
+                       >
+                         Connect
+                       </button>
+                     </div>
+                   </div>
+                 )}
+               </div>
+             </div>
+           </div>
+         )}
+
+         <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <button
               disabled={restartStatus === 'restarting'}
