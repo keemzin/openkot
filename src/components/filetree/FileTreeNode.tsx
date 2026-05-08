@@ -4,7 +4,7 @@ import { gitStatusColor, gitStatusLabel } from '../../utils/gitUtils';
 import { fileColor, getFileExt } from '../../utils/fileUtils';
 import { InlineInput } from './InlineInput';
 
-export const FileTreeNode = React.memo(function FileTreeNode({ entry, depth, onFileClick, selectedPath, showHidden, onContextMenu, inlineEdit, onInlineConfirm, onInlineCancel, refreshKey, gitStatus, folderBadge, getFileGitStatus, getFolderBadge }: {
+export const FileTreeNode = React.memo(function FileTreeNode({ entry, depth, onFileClick, selectedPath, showHidden, onContextMenu, inlineEdit, onInlineConfirm, onInlineCancel, refreshKey, gitStatus, folderBadge, getFileGitStatus, getFolderBadge, revealDir }: {
   entry: FsEntry; depth: number; onFileClick: (p: string) => void; selectedPath: string | null;
   showHidden: boolean; onContextMenu: (e: React.MouseEvent, entry: FsEntry) => void;
   inlineEdit: InlineEdit | null; onInlineConfirm: (v: string) => void; onInlineCancel: () => void;
@@ -13,6 +13,7 @@ export const FileTreeNode = React.memo(function FileTreeNode({ entry, depth, onF
   folderBadge?: { M: number; A: number; D: number } | null;
   getFileGitStatus: (path: string) => GitFileStatus | undefined;
   getFolderBadge: (path: string) => { M: number; A: number; D: number } | null;
+  revealDir?: string | null;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [children, setChildren] = useState<FsEntry[] | null>(null);
@@ -36,6 +37,18 @@ export const FileTreeNode = React.memo(function FileTreeNode({ entry, depth, onF
     if (expanded) loadChildren(entry.path);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
+
+  // Auto-expand cascade for reveal in file tree
+  useEffect(() => {
+    if (!revealDir || !entry.isDirectory) return;
+    const normPath = entry.path.replace(/\\/g, '/');
+    const normReveal = revealDir.replace(/\\/g, '/');
+    if (normReveal === normPath || normReveal.startsWith(normPath + '/')) {
+      if (!expanded) setExpanded(true);
+      if (children === null) loadChildren(entry.path);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [revealDir]);
 
   const toggle = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -110,6 +123,7 @@ export const FileTreeNode = React.memo(function FileTreeNode({ entry, depth, onF
               gitStatus={!c.isDirectory ? getFileGitStatus(c.path) : undefined}
               folderBadge={c.isDirectory ? getFolderBadge(c.path) : null}
               getFileGitStatus={getFileGitStatus} getFolderBadge={getFolderBadge}
+              revealDir={revealDir}
             />
           ))}
         </div>

@@ -5,7 +5,7 @@ import { ContextMenu } from './ContextMenu';
 import { InlineInput } from './InlineInput';
 import { GitPanel } from '../git/GitPanel';
 import { onOpenFile } from '../../utils/fileOpenListener';
-import type { FsEntry, CtxMenu, InlineEdit, GitStatus, GitFileStatus } from '../../types';
+import type { FsEntry, CtxMenu, InlineEdit, GitStatus, GitFileStatus, ContentSearchResult } from '../../types';
 import { gitStatusColor, gitStatusLabel } from '../../utils/gitUtils';
 import { fileColor, getFileExt } from '../../utils/fileUtils';
 
@@ -49,7 +49,9 @@ export function FileTreePanel({ workingDir }: FileTreePanelProps) {
   const [toastMsg, setToastMsg] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Array<FsEntry & { relativePath?: string }> | null>(null);
+  const [searchMode, setSearchMode] = useState<'filename' | 'content'>('filename');
   const [searching, setSearching] = useState(false);
+  const [revealDir, setRevealDir] = useState<string | null>(null);
   const [gitStatus, setGitStatus] = useState<GitStatus | null>(null);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -133,12 +135,13 @@ export function FileTreePanel({ workingDir }: FileTreePanelProps) {
     setSearching(true);
     searchTimer.current = setTimeout(async () => {
       try {
-        const r = await fetch(`/api/fs/search?dir=${encodeURIComponent(workingDir)}&q=${encodeURIComponent(searchQuery.trim())}`);
+        const endpoint = searchMode === 'content' ? '/api/fs/search-text' : '/api/fs/search';
+        const r = await fetch(`${endpoint}?dir=${encodeURIComponent(workingDir)}&q=${encodeURIComponent(searchQuery.trim())}`);
         setSearchResults(await r.json());
       } catch { setSearchResults([]); }
       setSearching(false);
-    }, 250);
-  }, [searchQuery, workingDir]);
+    }, searchMode === 'content' ? 400 : 250);
+  }, [searchQuery, workingDir, searchMode]);
 
   const getFileGitStatus = useCallback((filePath: string): GitFileStatus | undefined => {
     if (!gitStatus?.files) return undefined;
@@ -177,6 +180,13 @@ export function FileTreePanel({ workingDir }: FileTreePanelProps) {
 
   const handleCtxAction = async (action: string, entry: FsEntry) => {
     if (action === 'copyPath') { await navigator.clipboard.writeText(entry.path.replace(/\//g, '\\')).catch(() => {}); showToast('Path copied'); return; }
+    if (action === 'reveal') {
+      setSearchQuery('');
+      setTab('files');
+      const dir = entry.path.replace(/\\/g, '/').split('/').slice(0, -1).join('/');
+      setRevealDir(dir);
+      return;
+    }
     if (action === 'rename') { setInlineEdit({ entryPath: entry.path, type: 'rename', currentName: entry.name }); return; }
     if (action === 'newFile') { setInlineEdit({ parentPath: entry.path, type: 'newFile' }); return; }
     if (action === 'newFolder') { setInlineEdit({ parentPath: entry.path, type: 'newFolder' }); return; }
@@ -242,8 +252,15 @@ export function FileTreePanel({ workingDir }: FileTreePanelProps) {
         <div style={{ padding: '6px 8px', borderBottom: '1px solid var(--bg-3)', flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', background: 'var(--bg-2)', border: '1px solid var(--border)', borderRadius: 6, padding: '4px 8px', gap: 6 }}>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--text-4)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search files..."
+            <input value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder={searchMode === 'content' ? 'Search file contents...' : 'Search files...'}
               style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: 'var(--text)', fontSize: 12, fontFamily: 'inherit' }} />
+            <button
+              onClick={() => setSearchMode(m => m === 'filename' ? 'content' : 'filename')}
+              title={searchMode === 'content' ? 'Switch to file name search' : 'Switch to content search'}
+              style={{ background: 'transparent', border: 'none', color: 'var(--text-4)', cursor: 'pointer', fontSize: 11, padding: '2px 6px', borderRadius: 4, fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 3, opacity: 0.7 }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+              {searchMode === 'content' ? 'text' : 'file'}
+            </button>
             {searchQuery && <button onClick={() => setSearchQuery('')} style={{ background: 'transparent', border: 'none', color: 'var(--text-4)', cursor: 'pointer', fontSize: 14, padding: 0, lineHeight: 1 }}>x</button>}
           </div>
         </div>
@@ -266,18 +283,32 @@ export function FileTreePanel({ workingDir }: FileTreePanelProps) {
               const color = gitStatusColor(gs);
               const label = gitStatusLabel(gs);
               const dir = e.relativePath?.split('/').slice(0, -1).join('/');
+              const isContent = 'line_number' in e;
+              const cres = isContent ? (e as any as ContentSearchResult) : null;
               return (
-                <div key={e.path} onClick={() => handleFileClick(e.path)}
-                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '5px 10px', cursor: 'pointer' }}
+                <div key={e.path + (cres?.line_number ?? '')} onClick={() => handleFileClick(e.path)}
+                  onContextMenu={ev => {
+                    ev.preventDefault();
+                    setCtxMenu({ x: Math.min(ev.clientX, window.innerWidth - 170), y: Math.min(ev.clientY, window.innerHeight - 200), entry: { name: e.name, path: e.path, isDirectory: false }, extra: 'search' });
+                  }}
+                  style={{ display: 'flex', alignItems: 'flex-start', gap: 6, padding: '5px 10px', cursor: 'pointer' }}
                   onMouseEnter={e2 => (e2.currentTarget.style.background = 'var(--bg-2)')}
                   onMouseLeave={e2 => (e2.currentTarget.style.background = 'transparent')}
                 >
-                  <span style={{ fontSize: 10, color: fileColor(e.name), fontFamily: 'monospace', minWidth: 26, textAlign: 'center', background: 'var(--bg-3)', borderRadius: 3, padding: '1px 3px' }}>{getFileExt(e.name).slice(0, 3) || '.'}</span>
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    <span style={{ color: 'var(--text)', fontSize: 13 }}>{e.name}</span>
-                    {dir && <span style={{ color: 'var(--text-4)', fontSize: 11, marginLeft: 6 }}>{dir}</span>}
+                  <span style={{ fontSize: 10, color: fileColor(e.name), fontFamily: 'monospace', minWidth: 26, textAlign: 'center', background: 'var(--bg-3)', borderRadius: 3, padding: '1px 3px', marginTop: cres ? 2 : 0 }}>{getFileExt(e.name).slice(0, 3) || '.'}</span>
+                  <span style={{ flex: 1, overflow: 'hidden', minWidth: 0 }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ color: 'var(--text)', fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{e.name}</span>
+                      {cres && <span style={{ color: 'var(--text-4)', fontSize: 10, flexShrink: 0 }}>line {cres.line_number}</span>}
+                      {label && <span style={{ fontSize: 11, color: color ?? 'var(--text-3)', fontWeight: 700, flexShrink: 0, marginLeft: 'auto' }}>{label}</span>}
+                    </span>
+                    {dir && <span style={{ color: 'var(--text-4)', fontSize: 11, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{dir}</span>}
+                    {cres?.line && (
+                      <span style={{ color: 'var(--text-4)', fontSize: 11, display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace', marginTop: 1, opacity: 0.7 }}>
+                        {cres.line.trim().slice(0, 80)}
+                      </span>
+                    )}
                   </span>
-                  {label && <span style={{ fontSize: 11, color: color ?? 'var(--text-3)', fontWeight: 700, flexShrink: 0 }}>{label}</span>}
                 </div>
               );
             })}
@@ -304,6 +335,7 @@ export function FileTreePanel({ workingDir }: FileTreePanelProps) {
                   gitStatus={!e.isDirectory ? getFileGitStatus(e.path) : undefined}
                   folderBadge={e.isDirectory ? getFolderBadge(e.path) : null}
                   getFileGitStatus={getFileGitStatus} getFolderBadge={getFolderBadge}
+                  revealDir={revealDir}
                 />
               ))
             }

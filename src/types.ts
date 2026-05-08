@@ -97,3 +97,10 @@ export type PermissionRequest = {
   metadata: Record<string, any>;
   always: string[];
 };
+
+export type ContentSearchResult = FsEntry & {
+  relativePath: string;
+  line_number: number;
+  line: string;
+  match: string;
+};

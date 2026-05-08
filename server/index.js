@@ -1111,16 +1111,36 @@ async function start() {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 
-  // File search — recursive find matching name pattern
+  // File search — ripgrep-powered via OpenCode (fallback to recursive walk)
   app.get('/api/fs/search', async (req, res) => {
     const dir = typeof req.query.dir === 'string' ? req.query.dir : WORKING_DIR;
-    const query = typeof req.query.q === 'string' ? req.query.q.toLowerCase() : '';
+    const query = typeof req.query.q === 'string' ? req.query.q : '';
     if (!query) return res.json([]);
 
+    // Try OpenCode's ripgrep-powered search first
+    if (isOpenCodeReady) {
+      try {
+        const url = `http://${OPENCODE_HOST}:${OPENCODE_PORT}/find/file?directory=${encodeURIComponent(dir)}&query=${encodeURIComponent(query)}&dirs=false&type=file&limit=50`;
+        const response = await fetch(url, { signal: AbortSignal.timeout(4000) });
+        if (response.ok) {
+          const paths = await response.json();
+          const dirNorm = dir.replace(/\\/g, '/');
+          const results = paths.map(p => {
+            const normPath = (typeof p === 'string' ? p : String(p)).replace(/\\/g, '/');
+            const name = normPath.split('/').pop() || normPath;
+            const relativePath = normPath.startsWith(dirNorm + '/') ? normPath.slice(dirNorm.length + 1) : normPath;
+            return { name, path: normPath, relativePath };
+          });
+          return res.json(results);
+        }
+      } catch { /* fall through to walk */ }
+    }
+
+    // Fallback: recursive walk
+    const q = query.toLowerCase();
     const IGNORED = new Set(['node_modules', '.git', 'dist', 'build', '.next', '__pycache__']);
     const results = [];
     const MAX = 50;
-
     async function walk(dirPath, depth) {
       if (depth > 8 || results.length >= MAX) return;
       let entries;
@@ -1132,15 +1152,47 @@ async function start() {
         const fullPath = path.join(dirPath, e.name).replace(/\\/g, '/');
         if (e.isDirectory()) {
           await walk(fullPath, depth + 1);
-        } else if (e.name.toLowerCase().includes(query)) {
+        } else if (e.name.toLowerCase().includes(q)) {
           const rel = fullPath.replace(dir.replace(/\\/g, '/') + '/', '');
           results.push({ name: e.name, path: fullPath, relativePath: rel });
         }
       }
     }
-
     await walk(dir, 0);
     res.json(results);
+  });
+
+  // Content search — ripgrep text search via OpenCode
+  app.get('/api/fs/search-text', async (req, res) => {
+    const dir = typeof req.query.dir === 'string' ? req.query.dir : WORKING_DIR;
+    const pattern = typeof req.query.q === 'string' ? req.query.q : '';
+    if (!pattern) return res.json([]);
+
+    if (isOpenCodeReady) {
+      try {
+        const url = `http://${OPENCODE_HOST}:${OPENCODE_PORT}/find?directory=${encodeURIComponent(dir)}&pattern=${encodeURIComponent(pattern)}`;
+        const response = await fetch(url, { signal: AbortSignal.timeout(8000) });
+        if (response.ok) {
+          const matches = await response.json();
+          const dirNorm = dir.replace(/\\/g, '/');
+          const results = matches.map(m => {
+            const normPath = (m.path?.text || '').replace(/\\/g, '/');
+            const name = normPath.split('/').pop() || normPath;
+            const relativePath = normPath.startsWith(dirNorm + '/') ? normPath.slice(dirNorm.length + 1) : normPath;
+            return {
+              name,
+              path: normPath,
+              relativePath,
+              line_number: m.line_number ?? 0,
+              line: m.lines?.text || '',
+              match: m.submatches?.[0]?.match?.text || '',
+            };
+          });
+          return res.json(results);
+        }
+      } catch { /* empty results */ }
+    }
+    res.json([]);
   });
 
   // Permission routes (modular - matches OpenChamber pattern)
