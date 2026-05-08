@@ -241,6 +241,8 @@ export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming, mod
   });
 
   const viewLabel = view === 'full' ? 'Full' : view === 'justify' ? 'Justify' : 'Hidden';
+  const toolCount = parts.filter(p => p.type === 'tool').length;
+  const gearRotation = view === 'hidden' ? 0 : view === 'justify' ? justificationParts.length * 36 : toolCount * 36;
 
   return (
     <div style={{ marginBottom: 4 }}>
@@ -249,29 +251,31 @@ export const ToolGroup = React.memo(function ToolGroup({ parts, isStreaming, mod
         title={`Trail view: ${view}. Click to cycle: Full → Justify → Hidden`}
         onClick={cycle}
         style={{
+          position: 'sticky', top: 0, zIndex: 1,
           display: 'flex', alignItems: 'center', gap: 6,
-          background: 'transparent', border: 'none', cursor: 'pointer',
+          background: 'var(--bg)', border: 'none', cursor: 'pointer',
           fontFamily: 'inherit', padding: '2px 0', marginBottom: view !== 'hidden' ? 4 : 0,
         }}
       >
         <span style={{ color: 'var(--tools-icon)', display: 'inline-flex', alignItems: 'center' }}>
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+            style={{ transform: `rotate(${gearRotation}deg)`, transformOrigin: '50% 50%', transition: 'transform 0.3s ease' }}>
+            <circle cx="12" cy="12" r="9" strokeWidth="1.5" opacity="0.25" />
+            <line x1="12" y1="12" x2="12" y2="3" strokeWidth="2" strokeLinecap="round" />
+            <circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" />
           </svg>
         </span>
         <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--tools-title)' }}>Trail</span>
         <span style={{ fontSize: '0.75rem', color: 'var(--tools-description)', marginLeft: 4 }}>{viewLabel}</span>
-        {anyRunning && (
-          <span style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--accent)', boxShadow: '0 0 4px var(--accent)', flexShrink: 0 }} />
-        )}
-        {!anyRunning && modelName && (
+        {modelName && (
           <span style={{
             display: 'inline-flex', alignItems: 'center', gap: 3,
             fontSize: '0.75rem', color: 'var(--accent)',
-            background: 'var(--accent-dim)', border: '1px solid rgba(237,180,73,0.25)',
+            background: anyRunning ? 'var(--bg-3)' : 'var(--accent-dim)',
+            border: `1px solid ${anyRunning ? 'var(--border-2)' : 'rgba(237,180,73,0.25)'}`,
             borderRadius: 4, padding: '1px 6px',
           }}>
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.7, flexShrink: 0 }}>
+            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8, flexShrink: 0 }}>
               <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
             </svg>
             {providerName && <span style={{ opacity: 0.6 }}>{providerName}:</span>}
