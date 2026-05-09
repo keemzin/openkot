@@ -259,6 +259,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'plan' | 'terminal' | 'instances'>('chat');
   const [sessionPlanPaths, setSessionPlanPaths] = useState<Record<string, string>>({});
   const [commands, setCommands] = useState<{ name: string; description: string; template: string }[]>([]);
+  const [permissionRules, setPermissionRules] = useState<Record<string, string>>({});
   const [showCmdDropdown, setShowCmdDropdown] = useState(false);
   const [cmdFilter, setCmdFilter] = useState('');
   const [cmdSelectedIndex, setCmdSelectedIndex] = useState(0);
@@ -453,6 +454,8 @@ function App() {
           list.sort((a, b) => { if (a.isFree !== b.isFree) return a.isFree ? -1 : 1; if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1; return a.name.localeCompare(b.name); });
           setModels(list); setSelectedModel(list[0] ?? null);
         }).catch((err: any) => { console.error('[provider.list] error:', err); });
+        // Load permission rules from config
+        fetch('/api/config/permissions').then(r => r.json()).then(setPermissionRules).catch(() => {});
       });
     }).catch(() => {});
   }, []);
@@ -840,12 +843,13 @@ function App() {
     let sid: string | undefined;
     try {
       sid = await getOrCreateSession();
-      const dir = getWorkingDir();
       const client = await getClient();
       const resp: any = await client.session.promptAsync({
         sessionID: sid,
-        directory: dir,
-        model: { providerID: selectedModel.providerId, modelID: selectedModel.id },
+        model: {
+          providerID: selectedModel.providerId,
+          modelID: selectedModel.id,
+        },
         parts: [{ type: 'text', text: finalText }],
         agent: selectedAgent,
       });
@@ -1404,7 +1408,7 @@ function App() {
 
           {/* Render pending permissions for current session */}
           {sessionId && permissions[sessionId]?.filter(p => !sessionAutoAccept[sessionId])?.map(p => (
-            <PermissionCard key={p.id} permission={p} onReply={replyToPermission} />
+            <PermissionCard key={p.id} permission={p} onReply={replyToPermission} configRule={permissionRules[p.permission?.toLowerCase()] || permissionRules['*']} />
           ))}
           {error && (
             <div style={{ padding: '8px 12px', background: '#2a1a1a', border: '1px solid #5a2a2a', borderRadius: 8, color: 'var(--red)', fontSize: 13 }}>{error}</div>

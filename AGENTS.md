@@ -1,4 +1,10 @@
 # AGENTS.md
+always utilise sequential-thinking and context7
+to test any changes, use chrome-devtools mcp on localhost:5173
+never run bun run build
+let the user run it
+
+never commit on the user's behalf
 
 ## Development Workflow
 
@@ -68,3 +74,8 @@ powershell -ExecutionPolicy Bypass -File dev-stop.ps1
 
 - Default working directory for AI operations: `WORKSPACE/` (or whatever `WORKING_DIR` points to).
 - Only modify root-level code (`src/`, `server/`, `cli/`) when explicitly asked.
+
+## Architecture Reference
+
+- Architecture deep-dive (file map, data flows, SSE): see `openkot-architecture.md`
+- Keep `openkot-architecture.md` in sync when adding/removing/renaming files or changing data flow
