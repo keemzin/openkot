@@ -837,8 +837,9 @@ function App() {
     setMessages(prev => [...prev, { id: tempAssistantId, role: 'assistant', content: '' }]);
     setStreamingMsgId(tempAssistantId);
 
+    let sid: string | undefined;
     try {
-      const sid = await getOrCreateSession();
+      sid = await getOrCreateSession();
       const dir = getWorkingDir();
       const client = await getClient();
       const resp: any = await client.session.promptAsync({
@@ -856,6 +857,17 @@ function App() {
       // Only start listening after confirming the prompt was accepted
       listenToSession(sid, tempAssistantId);
     } catch (err: any) {
+      // "signal is aborted without reason" is a browser quirk that fires when
+      // the SDK internally cancels its own signal after a response is received.
+      // It's not a real error — the prompt was accepted, so just start listening.
+      const isSpuriousAbort =
+        err?.name === 'AbortError' ||
+        (typeof err?.message === 'string' && err.message.toLowerCase().includes('aborted'));
+      if (isSpuriousAbort && sid) {
+        console.warn('[sendMessage] ignoring spurious abort signal, starting listener anyway');
+        listenToSession(sid, tempAssistantId);
+        return;
+      }
       const msg = err?.data?.message ?? err?.message ?? 'Failed to send message';
       console.error('[sendMessage] error:', err);
       setError(msg);
