@@ -62,6 +62,10 @@ export function useSessionEvents(options: SessionEventsOptions) {
   const deltaBufferRef = useRef<Map<string, Map<string, string>>>(new Map());
   const rafRef = useRef<number | null>(null);
 
+  // Tracks when the SSE stream last delivered any event — used by safety poll
+  // to distinguish "SSE is alive but session is idle (delegation)" from "SSE is dead"
+  const lastSseEventRef = useRef<number>(Date.now());
+
   const cleanupSession = useCallback((sid: string, error?: string | null) => {
     const cbs = callbacksRef.current;
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
@@ -96,21 +100,32 @@ export function useSessionEvents(options: SessionEventsOptions) {
     abortRef.current = abort;
 
     // ── Safety poll: while loading, periodically check session.status ──
+    // Only acts when SSE appears dead (no recent events) AND session is truly idle.
+    // This prevents premature cleanup during delegation where the parent session
+    // intentionally transitions to idle/retry while waiting for a child session.
     if (loadingCheckTimerRef.current) {
       clearInterval(loadingCheckTimerRef.current);
     }
+    lastSseEventRef.current = Date.now();
     loadingCheckTimerRef.current = setInterval(async () => {
       if (abort.signal.aborted) return;
       const dir = callbacksRef.current.getWorkingDir();
       if (!dir || !sid) return;
       try {
+        // If SSE delivered events recently, trust the SSE path — don't intervene.
+        // This is critical: during delegation the parent goes idle on purpose,
+        // and the safety poll must not kill it while SSE is alive.
+        const sseAliveMs = Date.now() - lastSseEventRef.current;
+        if (sseAliveMs < SAFETY_POLL_INTERVAL * 2) return;
+
         const client = await getClient();
         const resp: any = await client.session.status({ directory: dir });
         const statusData = resp?.data ?? resp;
         const sessionStatus = statusData?.[sid];
-        // If session is no longer busy but we're still loading, SSE missed the idle event
-        if (sessionStatus?.type !== 'busy') {
-          console.warn('[useSessionEvents] safety poll: session idle but SSE missed it, recovering');
+        // "retry" status means session is still actively retrying — don't touch it.
+        // Only clean up when session is truly idle AND SSE appears dead.
+        if (sessionStatus?.type !== 'busy' && sessionStatus?.type !== 'retry') {
+          console.warn('[useSessionEvents] safety poll: SSE silent and session not busy, recovering');
           abort.abort();
           abortRef.current = null;
           cleanupSession(sid);
@@ -165,7 +180,9 @@ export function useSessionEvents(options: SessionEventsOptions) {
           }
 
           for await (const globalEvent of gen) {
-            if (abort.signal.aborted) break;
+            if (globalEvent == null || abort.signal.aborted) break;
+            // Track SSE health — every received event resets the timer
+            lastSseEventRef.current = Date.now();
             // Clear the reconnect stability timer since we got an event
             if (reconnectStabilityTimer) {
               clearTimeout(reconnectStabilityTimer);
@@ -299,8 +316,21 @@ export function useSessionEvents(options: SessionEventsOptions) {
             continue;
           }
 
-          // ── session.idle ───────────────────────────────────────────────
-          if (type === 'session.idle') {
+           // ── session.status ──────────────────────────────────────────────
+           // Fires during delegation transitions (busy↔idle↔retry).
+           // We keep busySessions accurate but DO NOT clean up here —
+           // session.idle is the terminal event for cleanup.
+           if (type === 'session.status') {
+             const props = p as { sessionID: string; status: { type: string } };
+             const { sessionID: statusSid, status: sessionStatus } = props;
+             if (statusSid && statusSid === sid && sessionStatus?.type === 'busy') {
+               cb.onBusySessions(prev => new Set(prev).add(sid));
+             }
+             continue;
+           }
+
+           // ── session.idle ───────────────────────────────────────────────
+           if (type === 'session.idle') {
             cleanupSession(sid);
             abort.abort();
             abortRef.current = null;
@@ -436,6 +466,10 @@ export function useSessionEvents(options: SessionEventsOptions) {
   const stopListening = useCallback(() => {
     if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     deltaBufferRef.current = new Map();
+    if (loadingCheckTimerRef.current) {
+      clearInterval(loadingCheckTimerRef.current);
+      loadingCheckTimerRef.current = null;
+    }
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
