@@ -10,9 +10,8 @@ import { TokenUsageIndicator } from './components/ui/TokenUsageIndicator';
 import { uid, getContextUsage, fallbackCopy } from './utils/helpers';
 import { useSessionEvents } from './hooks/useSessionEvents';
 import { getClient } from './lib/opencode';
-import { ChatMessage } from './components/chat/ChatMessage';
-import { ToolGroup } from './components/chat/ToolGroup';
-import { Markdown } from './components/chat/Markdown';
+import { useStreamingStore } from './stores/streamingStore';
+import { ChatMessages } from './components/chat/ChatMessages';
 import { DirPicker } from './components/app/DirPicker';
 import { FontPicker } from './components/app/FontPicker';
 import { Sidebar } from './components/Sidebar';
@@ -59,8 +58,8 @@ import { RightPanel } from './components/ui/RightPanel';
 // Git status
 
 
-import { QuestionCard, type QuestionRequest } from './components/app/QuestionCard';
-import { PermissionCard, type PermissionRequest } from './components/app/PermissionCard';
+import type { QuestionRequest } from './components/app/QuestionCard';
+import type { PermissionRequest } from './components/app/PermissionCard';
 import { SessionItem, type SessionInfo } from './components/app/SessionItem';
 import { PlanView } from './components/app/PlanView';
 import { InstancesPanel } from './components/app/InstancesPanel';
@@ -82,8 +81,6 @@ function extractPlanPathFromParts(parts: Part[]): string | null {
 function App() {
   const [inputText, setInputText] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
-  const [partsMap, setPartsMap] = useState<Record<string, Part[]>>({});
-  const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [busySessions, setBusySessions] = useState<Set<string>>(new Set());
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -265,9 +262,6 @@ function App() {
   const [cmdSelectedIndex, setCmdSelectedIndex] = useState(0);
   const [questions, setQuestions] = useState<Record<string, QuestionRequest[]>>({});
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-  const isNearBottomRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sessionIdRef = useRef<string | null>(null);
 
@@ -282,8 +276,8 @@ function App() {
     sessionAutoAcceptRef,
     getWorkingDir,
     onMessageUpdate: (updater) => setMessages(updater),
-    onPartsUpdate: (updater) => setPartsMap(updater),
-    onStreamingMsgId: (id) => setStreamingMsgId(id),
+    onPartsUpdate: (updater) => useStreamingStore.getState().setPartsMap(updater),
+    onStreamingMsgId: (id) => useStreamingStore.getState().setStreamingMsgId(id),
     onBusySessions: (updater) => setBusySessions(updater),
     onError: (error) => setError(error),
     onLoading: (loading) => setIsLoading(loading),
@@ -291,22 +285,6 @@ function App() {
     onPermissionsUpdate: (updater) => setPermissions(updater),
     onSessionIdle: () => loadSessions(),
   });
-
-  // Track scroll position — don't auto-scroll if user scrolled up
-  const handleChatScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    const threshold = 70;
-    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-  }, []);
-
-  // Smart auto-scroll: only force to bottom when near bottom or for permissions/questions
-  useEffect(() => {
-    const hasPermissions = Object.values(permissions).some(arr => arr.length > 0);
-    const hasQuestions = Object.values(questions).some(arr => arr.length > 0);
-    if (isNearBottomRef.current || hasPermissions || hasQuestions) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, partsMap, permissions, questions]);
 
   // Close model dropdown on outside click
   useEffect(() => {
@@ -344,18 +322,19 @@ function App() {
     }).catch(() => {});
   }, []);
 
-  // Detect plan file path from tool parts ” watches for write/edit to PLAN.md
+  // Detect plan file path from tool parts — watches for write/edit to PLAN.md
   useEffect(() => {
     if (!sessionId) return;
     if (sessionPlanPaths[sessionId]) return;
-    for (const parts of Object.values(partsMap)) {
+    const currentPartsMap = useStreamingStore.getState().partsMap;
+    for (const parts of Object.values(currentPartsMap)) {
       const found = extractPlanPathFromParts(parts as Part[]);
       if (found) {
         setSessionPlanPaths(prev => ({ ...prev, [sessionId]: found }));
         return;
       }
     }
-  }, [sessionId, partsMap, sessionPlanPaths]);
+  }, [sessionId, sessionPlanPaths]);
   // Main startup effect: load config, then wait for opencode to be ready
   useEffect(() => {
     // 1. Load basic server config (workingDir)
@@ -576,7 +555,7 @@ function App() {
         msgs.push({ id: rec.info.id, role: rec.info.role, content: '', tokens: rec.info.tokens, model: rec.info.modelID ?? rec.info.model ?? undefined });
         pm[rec.info.id] = rec.parts ?? [];
       }
-      setMessages(msgs); setPartsMap(pm);
+      setMessages(msgs); useStreamingStore.getState().setPartsMap(pm);
     } catch {}
   }, []);
 
@@ -591,7 +570,7 @@ function App() {
     const dir = getWorkingDir();
     const client = await getClient();
     await client.session.delete({ sessionID: id, directory: dir }).catch(() => {});
-    if (sessionId === id) { setSessionId(null); setMessages([]); setPartsMap({}); }
+    if (sessionId === id) { setSessionId(null); setMessages([]); useStreamingStore.getState().setPartsMap({}); }
     await loadSessions();
   }, [loadSessions, sessionId]);
 
@@ -606,20 +585,20 @@ function App() {
       if (forkedData?.id) {
         await loadSessions();
         stopListening();
-        setIsLoading(false); setError(null); setStreamingMsgId(null);
-        setSessionId(forkedData.id); setMessages([]); setPartsMap({});
+        setIsLoading(false); setError(null); useStreamingStore.getState().setStreamingMsgId(null);
+        setSessionId(forkedData.id); setMessages([]); useStreamingStore.getState().setPartsMap({});
         await loadSessionMessages(forkedData.id);
       }
     } catch { /* ignore */ }
   }, [loadSessions, loadSessionMessages]);
 
   const revertSession = useCallback(async (messageId: string) => {
-    // Collect files touched by messages after the revert point
+    const currentPartsMap = useStreamingStore.getState().partsMap;
     const idx = messages.findIndex(m => m.id === messageId);
     const affectedMsgs = idx >= 0 ? messages.slice(idx) : [];
     const fileSet = new Set<string>();
     for (const m of affectedMsgs) {
-      const parts = partsMap[m.id] ?? [];
+      const parts = currentPartsMap[m.id] ?? [];
       for (const p of parts) {
         const toolName = (p.tool as string) || p.type;
         const isFileWrite = toolName === 'write' || toolName === 'edit' || toolName === 'patch';
@@ -631,19 +610,18 @@ function App() {
       }
     }
 
-    // Find the user message that preceded this assistant message — prefill it after revert
     const msgIdx = messages.findIndex(m => m.id === messageId);
     let prefillText: string | undefined;
     if (msgIdx > 0) {
       const prevMsg = messages[msgIdx - 1];
       if (prevMsg?.role === 'user') {
-        const userParts = partsMap[prevMsg.id] ?? [];
+        const userParts = currentPartsMap[prevMsg.id] ?? [];
         prefillText = userParts.filter(p => p.type === 'text').map(p => p.text ?? '').join('').trim() || undefined;
       }
     }
 
     setRevertConfirm({ messageId, affectedFiles: Array.from(fileSet), prefillText });
-  }, [messages, partsMap]);
+  }, [messages]);
 
   const doRevert = useCallback(async (messageId: string, prefillText?: string) => {
     const sid = sessionIdRef.current;
@@ -655,7 +633,7 @@ function App() {
       const idx = prev.findIndex(m => m.id === messageId);
       return idx >= 0 ? prev.slice(0, idx) : prev;
     });
-    setPartsMap(prev => {
+    useStreamingStore.getState().setPartsMap(prev => {
       const keepIds = new Set(messages.slice(0, messages.findIndex(m => m.id === messageId)).map(m => m.id));
       const next: Record<string, Part[]> = {};
       for (const k of Object.keys(prev)) {
@@ -684,8 +662,8 @@ function App() {
 
   const switchSession = useCallback(async (sid: string) => {
     stopListening();
-    setIsLoading(false); setError(null); setStreamingMsgId(null);
-    setSessionId(sid); setMessages([]); setPartsMap({});
+    setIsLoading(false); setError(null); useStreamingStore.getState().setStreamingMsgId(null);
+    setSessionId(sid); setMessages([]); useStreamingStore.getState().setPartsMap({});
     setActiveTab('chat');
 
     // Restore model selection for this session
@@ -739,8 +717,8 @@ function App() {
 
   const newSession = useCallback(() => {
     stopListening();
-    setIsLoading(false); setError(null); setStreamingMsgId(null);
-    setSessionId(null); setMessages([]); setPartsMap({});
+    setIsLoading(false); setError(null); useStreamingStore.getState().setStreamingMsgId(null);
+    setSessionId(null); setMessages([]); useStreamingStore.getState().setPartsMap({});
   }, [stopListening]);
 
   const getOrCreateSession = useCallback(async (): Promise<string> => {
@@ -779,12 +757,10 @@ function App() {
       // Add to UI as a user message
       const tempId = `temp_user_${uid()}`;
       setMessages(prev => [...prev, { id: tempId, role: 'user', content: text }]);
-      setPartsMap(prev => ({ ...prev, [tempId]: [{ id: uid(), type: 'text', text }] }));
+      useStreamingStore.getState().setPartsMap(prev => ({ ...prev, [tempId]: [{ id: uid(), type: 'text', text }] }));
       
       try {
         const client = await getClient();
-        // Send as a regular prompt - OpenCode queues it and processes after current task
-        // The SSE listener is already active and will continue receiving updates
         await client.session.promptAsync({
           sessionID: sid,
           directory: getWorkingDir(),
@@ -792,12 +768,10 @@ function App() {
           parts: [{ type: 'text', text }],
           agent: selectedAgent,
         });
-        console.log('[queue] Message queued, will be processed after current task completes');
       } catch (err: any) {
         console.error('[queue] Failed to send:', err);
-        // Remove the optimistic message on error
         setMessages(prev => prev.filter(m => m.id !== tempId));
-        setPartsMap(prev => {
+        useStreamingStore.getState().setPartsMap(prev => {
           const next = { ...prev };
           delete next[tempId];
           return next;
@@ -829,7 +803,7 @@ function App() {
     // Optimistic user message ” temp ID, will be replaced by server's real ID via SSE
     const tempUserMsgId = `temp_user_${uid()}`;
     setMessages(prev => [...prev, { id: tempUserMsgId, role: 'user', content: text }]);
-    setPartsMap(prev => ({ ...prev, [tempUserMsgId]: [{ id: uid(), type: 'text', text }] }));
+    useStreamingStore.getState().setPartsMap(prev => ({ ...prev, [tempUserMsgId]: [{ id: uid(), type: 'text', text }] }));
     setInputText('');
     setShowCmdDropdown(false);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -838,7 +812,7 @@ function App() {
     // Placeholder for "Thinking" ” will be replaced by real assistant message via SSE
     const tempAssistantId = `temp_asst_${uid()}`;
     setMessages(prev => [...prev, { id: tempAssistantId, role: 'assistant', content: '' }]);
-    setStreamingMsgId(tempAssistantId);
+    useStreamingStore.getState().setStreamingMsgId(tempAssistantId);
 
     let sid: string | undefined;
     try {
@@ -877,7 +851,7 @@ function App() {
       setError(msg);
       setMessages(prev => prev.filter(m => m.id !== tempAssistantId && m.id !== tempUserMsgId));
       setIsLoading(false);
-      setStreamingMsgId(null);
+      useStreamingStore.getState().setStreamingMsgId(null);
       stopListening();
     }
   };
@@ -917,15 +891,13 @@ function App() {
     // Close SSE locally
     stopListening();
 
-    // Mark the streaming message as stopped
-    const stoppedId = streamingMsgId;
+    const stoppedId = useStreamingStore.getState().streamingMsgId;
     setIsLoading(false);
-    setStreamingMsgId(null);
+    useStreamingStore.getState().setStreamingMsgId(null);
 
     if (stoppedId) {
-      setPartsMap(prev => {
+      useStreamingStore.getState().setPartsMap(prev => {
         const existing = prev[stoppedId] ?? [];
-        // If no text content yet, add a stopped indicator
         const hasText = existing.some(p => p.type === 'text' && (p.text ?? '').trim().length > 0);
         if (!hasText) {
           return { ...prev, [stoppedId]: [...existing, { id: 'stopped', type: 'text', text: '*(stopped)*' }] };
@@ -1280,143 +1252,22 @@ function App() {
         ) : activeTab === 'instances' ? (
           <InstancesPanel currentPort={window.location.port ? parseInt(window.location.port) : 80} />
         ) : activeTab !== 'terminal' && (
-          /* Chat view ” shown when chat tab is active */
-          <div ref={chatContainerRef} onScroll={handleChatScroll} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ width: '100%', maxWidth: 760, margin: '0 auto', padding: '12px 16px 80px', display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-              {messages.length === 0 && (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-4)', gap: 8, paddingTop: 80 }}>
-              <svg width="40" height="40" viewBox="0 0 100 100" fill="none" opacity={0.3}>
-                <path d="M50 50 L8.432 26 L8.432 74 L50 98 Z" fill="rgba(255,255,255,0.08)" stroke="#CECDC3" strokeWidth="2.5" strokeLinejoin="round"/>
-                <path d="M50 50 L91.568 26 L91.568 74 L50 98 Z" fill="rgba(255,255,255,0.08)" stroke="#CECDC3" strokeWidth="2.5" strokeLinejoin="round"/>
-                <path d="M50 2 L8.432 26 L50 50 L91.568 26 Z" fill="none" stroke="#CECDC3" strokeWidth="2.5" strokeLinejoin="round"/>
-              </svg>
-              <span style={{ fontSize: 14 }}>Start a conversation</span>
-            </div>
+          <ChatMessages
+            messages={messages}
+            models={models}
+            sessionId={sessionId}
+            sessionAutoAccept={sessionAutoAccept}
+            permissionRules={permissionRules}
+            questions={questions}
+            permissions={permissions}
+            error={error}
+            onFork={forkSession}
+            onRevert={revertSession}
+            onReplyToQuestion={replyToQuestion}
+            onRejectQuestion={rejectQuestion}
+            onReplyToPermission={replyToPermission}
+          />
           )}
-
-          {(() => {
-            // Group consecutive assistant messages into turns.
-            // Each turn = one Trail (all tools) + all text responses.
-            // User messages break turns.
-            type Turn = { msgs: typeof messages };
-            const turns: Turn[] = [];
-            for (const msg of messages) {
-              if (msg.role === 'user') {
-                turns.push({ msgs: [msg] });
-              } else {
-                const last = turns[turns.length - 1];
-                if (last && last.msgs[0].role === 'assistant') {
-                  last.msgs.push(msg);
-                } else {
-                  turns.push({ msgs: [msg] });
-                }
-              }
-            }
-            return turns.map((turn, ti) => {
-              if (turn.msgs[0].role === 'user') {
-                const msg = turn.msgs[0];
-                const isLastTurn = ti === turns.length - 1;
-                return <ChatMessage key={msg.id} msg={msg} parts={partsMap[msg.id]} isStreaming={msg.id === streamingMsgId} onFork={forkSession} onRevert={!isLastTurn ? revertSession : undefined} />;
-              }
-              // Assistant turn — ONE Trail for all tool activity, ONE final text response
-              // Collect all trail parts (tools + interleaved justification text) across all messages
-              const SKIP_TOOLS = new Set(['step-start', 'step_start', 'reasoning', 'thinking', 'snapshot']);
-              const allTrailParts: any[] = [];
-              let finalTextMsg: any = null;
-              let finalTailTextParts: any[] = [];
-
-              for (const m of turn.msgs) {
-                const mParts = partsMap[m.id] ?? [];
-                const lastToolIdx = mParts.reduce((acc: number, p: any, i: number) =>
-                  (p.type === 'tool' && !SKIP_TOOLS.has((p.tool ?? p.toolName ?? '').toLowerCase())) ? i : acc, -1);
-
-                if (lastToolIdx >= 0) {
-                  // Everything up to and including last real tool → Trail
-                  const trailSlice = mParts.slice(0, lastToolIdx + 1).filter((p: any) => {
-                    if (p.type === 'tool') return !SKIP_TOOLS.has((p.tool ?? p.toolName ?? '').toLowerCase());
-                    return p.type === 'text'; // keep interleaved text as justification
-                  });
-                  allTrailParts.push(...trailSlice);
-                  // Text after last tool = candidate final response
-                  const tail = mParts.slice(lastToolIdx + 1).filter((p: any) => p.type === 'text');
-                  if (tail.length > 0) { finalTailTextParts = tail; finalTextMsg = m; }
-                } else {
-                  // No tools in this message — it's a pure text response
-                  const textParts = mParts.filter((p: any) => p.type === 'text');
-                  const text = textParts.map((p: any) => p.text ?? '').join('') || m.content;
-                  if (text.trim().length > 0 || m.id === streamingMsgId) {
-                    finalTailTextParts = textParts.length > 0 ? textParts : [];
-                    finalTextMsg = m;
-                  }
-                }
-              }
-              // streaming message with no parts yet
-              if (!finalTextMsg && turn.msgs.length > 0) {
-                const last = turn.msgs[turn.msgs.length - 1];
-                if (last.id === streamingMsgId) { finalTextMsg = last; finalTailTextParts = []; }
-              }
-              return (
-                <div key={`turn-${ti}`} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {allTrailParts.length > 0 && (
-                    <div style={{ marginBottom: finalTextMsg ? 6 : 0 }}>
-                      <ToolGroup
-                        parts={allTrailParts}
-                        isStreaming={turn.msgs.some((m: any) => m.id === streamingMsgId)}
-                        modelName={(() => {
-                          // Use model from the last assistant message that has one
-                          const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
-                          if (!modelId) return undefined;
-                          const found = models.find(m => m.id === modelId);
-                          return found?.name ?? modelId;
-                        })()}
-                        providerName={(() => {
-                          const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
-                          if (!modelId) return undefined;
-                          return models.find(m => m.id === modelId)?.providerName;
-                        })()}
-                      />
-                    </div>
-                  )}
-                  {finalTextMsg && (
-                    <ChatMessage
-                      msg={finalTextMsg}
-                      parts={finalTailTextParts.length > 0 ? finalTailTextParts : (partsMap[finalTextMsg.id] ?? []).filter((p: any) => p.type === 'text')}
-                      isStreaming={finalTextMsg.id === streamingMsgId}
-                      hideTools
-                      modelName={(() => {
-                        const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
-                        if (!modelId) return undefined;
-                        const found = models.find(m => m.id === modelId);
-                        return found?.name ?? modelId;
-                      })()}
-                      providerName={(() => {
-                        const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
-                        if (!modelId) return undefined;
-                        return models.find(m => m.id === modelId)?.providerName;
-                      })()}
-                    />
-                  )}
-                </div>
-              );
-            });
-          })()}
-
-          {/* Render pending questions for current session */}
-          {sessionId && questions[sessionId]?.map(q => (
-            <QuestionCard key={q.id} question={q} onReply={replyToQuestion} onReject={rejectQuestion} />
-          ))}
-
-          {/* Render pending permissions for current session */}
-          {sessionId && permissions[sessionId]?.filter(p => !sessionAutoAccept[sessionId])?.map(p => (
-            <PermissionCard key={p.id} permission={p} onReply={replyToPermission} configRule={permissionRules[p.permission?.toLowerCase()] || permissionRules['*']} />
-          ))}
-          {error && (
-            <div style={{ padding: '8px 12px', background: '#2a1a1a', border: '1px solid #5a2a2a', borderRadius: 8, color: 'var(--red)', fontSize: 13 }}>{error}</div>
-          )}
-              <div ref={messagesEndRef} />
-            </div>{/* end max-width wrapper */}
-          </div>
-        )}
 
          {/* Input — hidden when not on chat tab */}
          {activeTab === 'chat' && (

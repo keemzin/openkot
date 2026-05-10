@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect } from 'react';
 import type { Part, QuestionRequest, PermissionRequest, Message } from '../types';
 import { getClient } from '../lib/opencode';
+import { useStreamingStore } from '../stores/streamingStore';
 
 interface SessionEventsOptions {
   sessionAutoAcceptRef: React.MutableRefObject<Record<string, boolean>>;
@@ -57,8 +58,14 @@ export function useSessionEvents(options: SessionEventsOptions) {
   const currentSessionIdRef = useRef<string>('');
   const loadingCheckTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Delta buffer + rAF flush — coalesce SSE deltas into a single React update per frame
+  const deltaBufferRef = useRef<Map<string, Map<string, string>>>(new Map());
+  const rafRef = useRef<number | null>(null);
+
   const cleanupSession = useCallback((sid: string, error?: string | null) => {
     const cbs = callbacksRef.current;
+    if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    deltaBufferRef.current = new Map();
     cbs.onLoading(false);
     cbs.onStreamingMsgId(null);
     cbs.onBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
@@ -179,7 +186,7 @@ export function useSessionEvents(options: SessionEventsOptions) {
             p?.sessionID;
           if (evtSid && evtSid !== sid) continue;
 
-          // ── message.part.delta (true streaming — append delta to part text) ──
+          // ── message.part.delta (true streaming — buffer + rAF flush) ──
           if (type === 'message.part.delta') {
             const { messageID, partID, field, delta } = p as {
               messageID: string; partID: string; field: string; delta: string;
@@ -187,23 +194,24 @@ export function useSessionEvents(options: SessionEventsOptions) {
             if (field !== 'text' || !delta || !messageID || !partID) continue;
 
             cb.onStreamingMsgId(messageID);
-            cb.onPartsUpdate(prev => {
-              const existing = prev[messageID] ?? [];
-              const idx = existing.findIndex(pp => pp.id === partID);
-              if (idx >= 0) {
-                // Append delta to existing text part
-                const part = existing[idx];
-                const next = [...existing];
-                next[idx] = { ...part, text: ((part.text as string) ?? '') + delta };
-                return { ...prev, [messageID]: next };
-              } else {
-                // New part — create it with the delta as initial text
-                return {
-                  ...prev,
-                  [messageID]: [...existing, { id: partID, type: 'text', text: delta, messageID, sessionID: evtSid ?? '' } as any],
-                };
-              }
-            });
+
+            // Buffer the delta — accumulate per messageID+partID
+            const buf = deltaBufferRef.current;
+            let partBuf = buf.get(messageID);
+            if (!partBuf) { partBuf = new Map(); buf.set(messageID, partBuf); }
+            partBuf.set(partID, (partBuf.get(partID) ?? '') + delta);
+
+            // Schedule rAF flush if not already scheduled
+            if (rafRef.current === null) {
+              rafRef.current = requestAnimationFrame(() => {
+                rafRef.current = null;
+                const batch = deltaBufferRef.current;
+                deltaBufferRef.current = new Map();
+                if (batch.size > 0) {
+                  useStreamingStore.getState().applyDeltaBatch(batch);
+                }
+              });
+            }
             continue;
           }
 
@@ -426,6 +434,8 @@ export function useSessionEvents(options: SessionEventsOptions) {
   }, [listenToSession]);
 
   const stopListening = useCallback(() => {
+    if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    deltaBufferRef.current = new Map();
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;
