@@ -318,13 +318,17 @@ export function useSessionEvents(options: SessionEventsOptions) {
 
            // ── session.status ──────────────────────────────────────────────
            // Fires during delegation transitions (busy↔idle↔retry).
-           // We keep busySessions accurate but DO NOT clean up here —
-           // session.idle is the terminal event for cleanup.
+           // Keeps busySessions in sync so the session can't get stuck-busy
+           // if session.idle never arrives.
            if (type === 'session.status') {
              const props = p as { sessionID: string; status: { type: string } };
              const { sessionID: statusSid, status: sessionStatus } = props;
-             if (statusSid && statusSid === sid && sessionStatus?.type === 'busy') {
-               cb.onBusySessions(prev => new Set(prev).add(sid));
+             if (statusSid && statusSid === sid) {
+               if (sessionStatus?.type === 'busy') {
+                 cb.onBusySessions(prev => new Set(prev).add(sid));
+               } else {
+                 cb.onBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
+               }
              }
              continue;
            }

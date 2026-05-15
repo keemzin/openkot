@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { flushSync } from 'react-dom';
 import { marked } from 'marked';
 
@@ -264,6 +264,7 @@ function App() {
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const pendingModelRestoreRef = useRef<string | null>(null);
 
   // Keep ref in sync with state so callbacks always see latest value
   useEffect(() => {
@@ -309,6 +310,16 @@ function App() {
   useEffect(() => {
     localStorage.setItem(LS_SESSION_MODEL_SELECTIONS, JSON.stringify(sessionModelSelections));
   }, [sessionModelSelections]);
+
+  // Re-apply saved model when models arrive late (after switchSession ran too early)
+  useEffect(() => {
+    if (models.length === 0 || !pendingModelRestoreRef.current) return;
+    const model = models.find(m => m.id === pendingModelRestoreRef.current);
+    if (model) {
+      setSelectedModel(model);
+      pendingModelRestoreRef.current = null;
+    }
+  }, [models]);
 
   // Fetch commands on mount ” wait until opencode is ready
 
@@ -403,13 +414,25 @@ function App() {
           setDirSessionsMap({ ...map });
         })();
 
-        // Fetch commands and models
-        getClient().then(client => client.command.list({ directory: _workingDir })).then((resp: any) => {
-          // v2 SDK returns { data: { value: [...], Count: N } } or { value: [...] }
-          const body = resp?.data ?? resp;
-          const arr: any[] = Array.isArray(body) ? body : (body?.value ?? []);
-          setCommands(arr.map((c: any) => ({ name: c.name, description: c.description, template: c.template })));
-        }).catch(() => {});
+        // Fetch commands from SDK and file-based commands
+        Promise.all([
+          getClient().then(client => client.command.list({ directory: _workingDir })).then((resp: any) => {
+            const body = resp?.data ?? resp;
+            const arr: any[] = Array.isArray(body) ? body : (body?.value ?? []);
+            return arr.map((c: any) => ({ name: c.name, description: c.description, template: c.template }));
+          }).catch(() => [] as { name: string; description: string; template: string }[]),
+          fetch('/api/config/commands').then(r => r.json()).then((arr: any[]) =>
+            arr.map((c: any) => ({ name: c.name, description: c.description, template: c.content }))
+          ).catch(() => [] as { name: string; description: string; template: string }[]),
+        ]).then(([sdkCommands, fileCommands]) => {
+          const merged = [...sdkCommands];
+          for (const fc of fileCommands) {
+            if (!merged.some(c => c.name === fc.name)) {
+              merged.push(fc);
+            }
+          }
+          setCommands(merged);
+        });
         // Load models — wait for workingDir so opencode is ready before hitting provider list
         getClient().then(client => client.provider.list({ directory: _workingDir })).then((resp: any) => {
           // v2 SDK: response is { data: { all, connected, default } } OR unwrapped { all, connected, default }
@@ -671,6 +694,8 @@ function App() {
     if (savedModelId && models.length > 0) {
       const model = models.find(m => m.id === savedModelId);
       if (model) setSelectedModel(model);
+    } else if (savedModelId) {
+      pendingModelRestoreRef.current = savedModelId;
     }
 
     await loadSessionMessages(sid);
@@ -838,9 +863,11 @@ function App() {
       // "signal is aborted without reason" is a browser quirk that fires when
       // the SDK internally cancels its own signal after a response is received.
       // It's not a real error — the prompt was accepted, so just start listening.
-      const isSpuriousAbort =
+      const isTimeout = typeof err?.message === 'string' && /timeout/i.test(err.message);
+      const isSpuriousAbort = !isTimeout && (
         err?.name === 'AbortError' ||
-        (typeof err?.message === 'string' && err.message.toLowerCase().includes('aborted'));
+        (typeof err?.message === 'string' && err.message.toLowerCase().includes('aborted'))
+      );
       if (isSpuriousAbort && sid) {
         console.warn('[sendMessage] ignoring spurious abort signal, starting listener anyway');
         listenToSession(sid, tempAssistantId);
