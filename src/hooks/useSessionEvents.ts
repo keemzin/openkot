@@ -1,6 +1,7 @@
 import { useRef, useCallback, useEffect } from 'react';
 import type { Part, QuestionRequest, PermissionRequest, Message } from '../types';
 import { getClient } from '../lib/opencode';
+import { useStreamingStore } from '../stores/streamingStore';
 
 interface SessionEventsOptions {
   sessionAutoAcceptRef: React.MutableRefObject<Record<string, boolean>>;
@@ -16,24 +17,73 @@ interface SessionEventsOptions {
   onSessionIdle: () => void;
 }
 
-export function useSessionEvents({
-  sessionAutoAcceptRef,
-  getWorkingDir,
-  onMessageUpdate,
-  onPartsUpdate,
-  onStreamingMsgId,
-  onBusySessions,
-  onError,
-  onLoading,
-  onQuestionsUpdate,
-  onPermissionsUpdate,
-  onSessionIdle,
-}: SessionEventsOptions) {
+/**
+ * Safety poll interval (ms) — checks session.status periodically while loading.
+ * Catches the case where SSE silently dies and never recovers.
+ */
+const SAFETY_POLL_INTERVAL = 3000;
+
+/**
+ * After an SSE reconnect, wait this long before checking if session went idle during the gap.
+ */
+const RECONNECT_STABILITY_DELAY = 2000;
+
+export function useSessionEvents(options: SessionEventsOptions) {
+  const {
+    sessionAutoAcceptRef: _sessionAutoAcceptRef,
+    getWorkingDir,
+    onMessageUpdate,
+    onPartsUpdate,
+    onStreamingMsgId,
+    onBusySessions,
+    onError,
+    onLoading,
+    onQuestionsUpdate,
+    onPermissionsUpdate,
+    onSessionIdle,
+  } = options;
+
+  // Store all callbacks in refs so listenToSession doesn't need stale-closure-free deps
+  const callbacksRef = useRef({
+    onMessageUpdate, onPartsUpdate, onStreamingMsgId, onBusySessions,
+    onError, onLoading, onQuestionsUpdate, onPermissionsUpdate, onSessionIdle, getWorkingDir,
+  });
+  callbacksRef.current = {
+    onMessageUpdate, onPartsUpdate, onStreamingMsgId, onBusySessions,
+    onError, onLoading, onQuestionsUpdate, onPermissionsUpdate, onSessionIdle, getWorkingDir,
+  };
+
   // AbortController replaces the old EventSource ref — abort() stops the stream
   const abortRef = useRef<AbortController | null>(null);
   const currentSessionIdRef = useRef<string>('');
+  const loadingCheckTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Delta buffer + rAF flush — coalesce SSE deltas into a single React update per frame
+  const deltaBufferRef = useRef<Map<string, Map<string, string>>>(new Map());
+  const rafRef = useRef<number | null>(null);
+
+  // Tracks when the SSE stream last delivered any event — used by safety poll
+  // to distinguish "SSE is alive but session is idle (delegation)" from "SSE is dead"
+  const lastSseEventRef = useRef<number>(Date.now());
+
+  const cleanupSession = useCallback((sid: string, error?: string | null) => {
+    const cbs = callbacksRef.current;
+    if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    deltaBufferRef.current = new Map();
+    cbs.onLoading(false);
+    cbs.onStreamingMsgId(null);
+    cbs.onBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
+    if (error) cbs.onError(error);
+    cbs.onSessionIdle();
+    if (loadingCheckTimerRef.current) {
+      clearInterval(loadingCheckTimerRef.current);
+      loadingCheckTimerRef.current = null;
+    }
+  }, []);
 
   const listenToSession = useCallback((sid: string, tempId: string, isOngoing: boolean = false) => {
+    const cbs = callbacksRef.current;
+
     // Cancel any existing stream before starting a new one
     if (abortRef.current) {
       abortRef.current.abort();
@@ -43,11 +93,45 @@ export function useSessionEvents({
     currentSessionIdRef.current = sid;
 
     if (!isOngoing) {
-      onBusySessions(prev => new Set(prev).add(sid));
+      cbs.onBusySessions(prev => new Set(prev).add(sid));
     }
 
     const abort = new AbortController();
     abortRef.current = abort;
+
+    // ── Safety poll: while loading, periodically check session.status ──
+    // Only acts when SSE appears dead (no recent events) AND session is truly idle.
+    // This prevents premature cleanup during delegation where the parent session
+    // intentionally transitions to idle/retry while waiting for a child session.
+    if (loadingCheckTimerRef.current) {
+      clearInterval(loadingCheckTimerRef.current);
+    }
+    lastSseEventRef.current = Date.now();
+    loadingCheckTimerRef.current = setInterval(async () => {
+      if (abort.signal.aborted) return;
+      const dir = callbacksRef.current.getWorkingDir();
+      if (!dir || !sid) return;
+      try {
+        // If SSE delivered events recently, trust the SSE path — don't intervene.
+        // This is critical: during delegation the parent goes idle on purpose,
+        // and the safety poll must not kill it while SSE is alive.
+        const sseAliveMs = Date.now() - lastSseEventRef.current;
+        if (sseAliveMs < SAFETY_POLL_INTERVAL * 2) return;
+
+        const client = await getClient();
+        const resp: any = await client.session.status({ directory: dir });
+        const statusData = resp?.data ?? resp;
+        const sessionStatus = statusData?.[sid];
+        // "retry" status means session is still actively retrying — don't touch it.
+        // Only clean up when session is truly idle AND SSE appears dead.
+        if (sessionStatus?.type !== 'busy' && sessionStatus?.type !== 'retry') {
+          console.warn('[useSessionEvents] safety poll: SSE silent and session not busy, recovering');
+          abort.abort();
+          abortRef.current = null;
+          cleanupSession(sid);
+        }
+      } catch {}
+    }, SAFETY_POLL_INTERVAL);
 
     // Fire-and-forget async loop — errors are handled inside
     (async () => {
@@ -60,20 +144,52 @@ export function useSessionEvents({
           const client = await getClient();
           if (abort.signal.aborted) return;
 
-          const result = await client.event.subscribe({ directory: getWorkingDir() || undefined });
+          const result = await client.event.subscribe({ directory: callbacksRef.current.getWorkingDir() || undefined });
           if (abort.signal.aborted) {
             result.stream.return(undefined);
             return;
           }
           const gen = result.stream;
-          abort.signal.addEventListener('abort', () => gen.return(undefined), { once: true });
+          abort.signal.addEventListener('abort', () => { try { gen.return(undefined); } catch {} }, { once: true });
+
+          // Check if this is a reconnection (failCount was > 0 before reset)
+          const isReconnecting = failCount > 0;
 
           // Reset reconnect delay on successful connection
           reconnectDelay = 500;
           failCount = 0;
 
+          // ── After reconnect, schedule a one-shot check for "missed idle" ──
+          let reconnectStabilityTimer: ReturnType<typeof setTimeout> | null = null;
+          if (isReconnecting) {
+            reconnectStabilityTimer = setTimeout(async () => {
+              if (abort.signal.aborted) return;
+              const dir = callbacksRef.current.getWorkingDir();
+              if (!dir || !sid) return;
+              try {
+                const client = await getClient();
+                const resp: any = await client.session.status({ directory: dir });
+                const statusData = resp?.data ?? resp;
+                const sessionStatus = statusData?.[sid];
+                if (sessionStatus?.type !== 'busy') {
+                  console.warn('[useSessionEvents] reconnect check: session idle during gap, recovering');
+                  cleanupSession(sid);
+                }
+              } catch {}
+            }, RECONNECT_STABILITY_DELAY);
+          }
+
           for await (const globalEvent of gen) {
-            if (abort.signal.aborted) break;
+            if (globalEvent == null || abort.signal.aborted) break;
+            // Track SSE health — every received event resets the timer
+            lastSseEventRef.current = Date.now();
+            // Clear the reconnect stability timer since we got an event
+            if (reconnectStabilityTimer) {
+              clearTimeout(reconnectStabilityTimer);
+              reconnectStabilityTimer = null;
+            }
+
+          const cb = callbacksRef.current;
 
           // v2 wraps events in { directory, payload }
           const event = (globalEvent as any)?.payload ?? globalEvent;
@@ -87,31 +203,32 @@ export function useSessionEvents({
             p?.sessionID;
           if (evtSid && evtSid !== sid) continue;
 
-          // ── message.part.delta (true streaming — append delta to part text) ──
+          // ── message.part.delta (true streaming — buffer + rAF flush) ──
           if (type === 'message.part.delta') {
             const { messageID, partID, field, delta } = p as {
               messageID: string; partID: string; field: string; delta: string;
             };
             if (field !== 'text' || !delta || !messageID || !partID) continue;
 
-            onStreamingMsgId(messageID);
-            onPartsUpdate(prev => {
-              const existing = prev[messageID] ?? [];
-              const idx = existing.findIndex(pp => pp.id === partID);
-              if (idx >= 0) {
-                // Append delta to existing text part
-                const part = existing[idx];
-                const next = [...existing];
-                next[idx] = { ...part, text: ((part.text as string) ?? '') + delta };
-                return { ...prev, [messageID]: next };
-              } else {
-                // New part — create it with the delta as initial text
-                return {
-                  ...prev,
-                  [messageID]: [...existing, { id: partID, type: 'text', text: delta, messageID, sessionID: evtSid ?? '' } as any],
-                };
-              }
-            });
+            cb.onStreamingMsgId(messageID);
+
+            // Buffer the delta — accumulate per messageID+partID
+            const buf = deltaBufferRef.current;
+            let partBuf = buf.get(messageID);
+            if (!partBuf) { partBuf = new Map(); buf.set(messageID, partBuf); }
+            partBuf.set(partID, (partBuf.get(partID) ?? '') + delta);
+
+            // Schedule rAF flush if not already scheduled
+            if (rafRef.current === null) {
+              rafRef.current = requestAnimationFrame(() => {
+                rafRef.current = null;
+                const batch = deltaBufferRef.current;
+                deltaBufferRef.current = new Map();
+                if (batch.size > 0) {
+                  useStreamingStore.getState().applyDeltaBatch(batch);
+                }
+              });
+            }
             continue;
           }
 
@@ -121,12 +238,12 @@ export function useSessionEvents({
             if (!part?.id) continue;
             const msgId = (part as any).messageID ?? tempId;
 
-            onMessageUpdate(prev => {
+            cb.onMessageUpdate(prev => {
               if (prev.some(m => m.id === msgId)) return prev;
               return prev.map(m => m.id === tempId ? { ...m, id: msgId } : m);
             });
-            onStreamingMsgId(msgId);
-            onPartsUpdate(prev => {
+            cb.onStreamingMsgId(msgId);
+            cb.onPartsUpdate(prev => {
               const base = prev[msgId] ?? prev[tempId] ?? [];
               const idx = base.findIndex(pp => pp.id === part.id);
               const next = [...base];
@@ -144,8 +261,8 @@ export function useSessionEvents({
           if (type === 'message.removed') {
             const removedId = p.messageID as string;
             if (removedId) {
-              onMessageUpdate(prev => prev.filter(m => m.id !== removedId));
-              onPartsUpdate(prev => {
+              cb.onMessageUpdate(prev => prev.filter(m => m.id !== removedId));
+              cb.onPartsUpdate(prev => {
                 const next = { ...prev };
                 delete next[removedId];
                 return next;
@@ -162,7 +279,7 @@ export function useSessionEvents({
             // Skip messages that OpenCode has marked as reverted
             if (info.revert) continue;
 
-            onMessageUpdate(prev => {
+            cb.onMessageUpdate(prev => {
               if (prev.some(m => m.id === info.id)) {
                 if (info.role === 'assistant' && (info.tokens || info.cost || info.modelID)) {
                   return prev.map(m => m.id === info.id ? {
@@ -178,7 +295,7 @@ export function useSessionEvents({
                 if (prev.some(m => m.id.startsWith('temp_user_'))) {
                   const tempUserId = prev.find(m => m.id.startsWith('temp_user_'))?.id;
                   if (tempUserId) {
-                    onPartsUpdate((pm: Record<string, Part[]>) => {
+                    cb.onPartsUpdate((pm: Record<string, Part[]>) => {
                       if (!pm[tempUserId]) return pm;
                       const next: Record<string, Part[]> = { ...pm, [info.id]: pm[tempUserId] };
                       delete next[tempUserId];
@@ -195,87 +312,66 @@ export function useSessionEvents({
               }
               return [...prev, { id: info.id, role: info.role, content: '' }];
             });
-            if (info.role === 'assistant') onStreamingMsgId(info.id);
+            if (info.role === 'assistant') cb.onStreamingMsgId(info.id);
             continue;
           }
 
-          // ── session.idle ───────────────────────────────────────────────
-          if (type === 'session.idle') {
-            onLoading(false);
-            onStreamingMsgId(null);
-            onBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
+           // ── session.status ──────────────────────────────────────────────
+           // Fires during delegation transitions (busy↔idle↔retry).
+           // Keeps busySessions in sync so the session can't get stuck-busy
+           // if session.idle never arrives.
+           if (type === 'session.status') {
+             const props = p as { sessionID: string; status: { type: string } };
+             const { sessionID: statusSid, status: sessionStatus } = props;
+             if (statusSid && statusSid === sid) {
+               if (sessionStatus?.type === 'busy') {
+                 cb.onBusySessions(prev => new Set(prev).add(sid));
+               } else {
+                 cb.onBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
+               }
+             }
+             continue;
+           }
+
+           // ── session.idle ───────────────────────────────────────────────
+           if (type === 'session.idle') {
+            cleanupSession(sid);
             abort.abort();
             abortRef.current = null;
-            onSessionIdle();
             break;
           }
 
           // ── session.error ──────────────────────────────────────────────
           if (type === 'session.error') {
             const err = p.error as any;
-            onError(err?.data?.message ?? err?.message ?? 'Unknown error');
-            onLoading(false);
-            onStreamingMsgId(null);
-            onBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
+            cleanupSession(sid, err?.data?.message ?? err?.message ?? 'Unknown error');
             abort.abort();
             abortRef.current = null;
             break;
           }
 
-          // ── permission.asked (v2 name) ─────────────────────────────────
-          if (type === 'permission.asked') {
-            const permission = p as PermissionRequest;
-            if (!permission?.id || !permission.sessionID) continue;
+           // ── permission.asked (v2 name) ─────────────────────────────────
+           if (type === 'permission.asked') {
+             const permission = p as PermissionRequest;
+             if (!permission?.id || !permission.sessionID) continue;
 
-            const quickCheck = !!sessionAutoAcceptRef.current[permission.sessionID];
-            console.log('permission.asked', { permissionId: permission.id, sessionID: permission.sessionID, quickCheck });
-
-            if (quickCheck) {
-              getClient().then(client => client.permission.reply({
-                requestID: permission.id,
-                reply: 'once',
-                directory: getWorkingDir(),
-              })).catch(() => {});
-            } else {
-              fetch(`/api/sessions/${permission.sessionID}/auto-accept`)
-                .then(r => r.json())
-                .then(data => {
-                  if (data.autoAccept) {
-                    getClient().then(client => client.permission.reply({
-                      requestID: permission.id,
-                      reply: 'once',
-                      directory: getWorkingDir(),
-                    })).catch(() => {});
-                  } else {
-                    onPermissionsUpdate(prev => {
-                      const existing = prev[permission.sessionID] ?? [];
-                      const idx = existing.findIndex(pp => pp.id === permission.id);
-                      const next = [...existing];
-                      if (idx >= 0) next[idx] = permission;
-                      else next.push(permission);
-                      return { ...prev, [permission.sessionID]: next };
-                    });
-                  }
-                })
-                .catch(() => {
-                  onPermissionsUpdate(prev => {
-                    const existing = prev[permission.sessionID] ?? [];
-                    const idx = existing.findIndex(pp => pp.id === permission.id);
-                    const next = [...existing];
-                    if (idx >= 0) next[idx] = permission;
-                    else next.push(permission);
-                    return { ...prev, [permission.sessionID]: next };
-                  });
-                });
-            }
-            continue;
+             console.log('permission.asked', { permissionId: permission.id, sessionID: permission.sessionID, autopilotDisabled: true });
+             cb.onPermissionsUpdate(prev => {
+               const existing = prev[permission.sessionID] ?? [];
+               const idx = existing.findIndex(pp => pp.id === permission.id);
+               const next = [...existing];
+               if (idx >= 0) next[idx] = permission;
+               else next.push(permission);
+               return { ...prev, [permission.sessionID]: next };
+             });
+             continue;
           }
 
           // ── permission.replied ─────────────────────────────────────────
           if (type === 'permission.replied') {
             const props = p as { sessionID?: string; requestID?: string };
             if (props.sessionID && props.requestID) {
-              onPermissionsUpdate(prev => {
+              cb.onPermissionsUpdate(prev => {
                 const existing = prev[props.sessionID!] ?? [];
                 const filtered = existing.filter(pp => pp.id !== props.requestID);
                 if (filtered.length === 0) {
@@ -293,7 +389,7 @@ export function useSessionEvents({
           if (type === 'question.asked') {
             const question = p as QuestionRequest;
             if (question?.id && question.sessionID) {
-              onQuestionsUpdate(prev => {
+              cb.onQuestionsUpdate(prev => {
                 const existing = prev[question.sessionID] ?? [];
                 const idx = existing.findIndex(q => q.id === question.id);
                 const next = [...existing];
@@ -309,7 +405,7 @@ export function useSessionEvents({
           if (type === 'question.replied' || type === 'question.rejected') {
             const props = p as { sessionID?: string; requestID?: string };
             if (props.sessionID && props.requestID) {
-              onQuestionsUpdate(prev => {
+              cb.onQuestionsUpdate(prev => {
                 const existing = prev[props.sessionID!] ?? [];
                 const filtered = existing.filter(q => q.id !== props.requestID);
                 if (filtered.length === 0) {
@@ -322,6 +418,12 @@ export function useSessionEvents({
             }
             continue;
           }
+        } // end for-await
+
+        // Clear reconnect stability timer if still pending
+        if (reconnectStabilityTimer) {
+          clearTimeout(reconnectStabilityTimer);
+          reconnectStabilityTimer = null;
         }
 
         // Stream ended without session.idle — unexpected disconnect
@@ -329,31 +431,29 @@ export function useSessionEvents({
         if (!abort.signal.aborted) {
           failCount++;
           console.warn(`[useSessionEvents] stream ended unexpectedly (attempt ${failCount}), reconnecting in ${reconnectDelay}ms...`);
-          // Only show error to user after 2+ failures — brief drops are silent
-          if (failCount >= 2) onError(`Connection lost. Reconnecting...`);
+          if (failCount >= 2) callbacksRef.current.onError(`Connection lost. Reconnecting...`);
           await new Promise(r => setTimeout(r, reconnectDelay));
-          if (failCount >= 2) onError(null);
+          if (failCount >= 2) callbacksRef.current.onError(null);
           reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
         }
 
       } catch (err: any) {
         if (err?.name === 'AbortError' || abort.signal.aborted) return;
         console.error('[useSessionEvents] stream error:', err);
-        // Wait and retry on error
         if (!abort.signal.aborted) {
           failCount++;
           if (failCount >= 2) {
-            onError(`Connection error. Reconnecting in ${reconnectDelay / 1000}s...`);
+            callbacksRef.current.onError(`Connection error. Reconnecting in ${reconnectDelay / 1000}s...`);
           }
           await new Promise(r => setTimeout(r, reconnectDelay));
-          if (failCount >= 2) onError(null);
+          if (failCount >= 2) callbacksRef.current.onError(null);
           reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
         }
       }
       } // end while
     })();
 
-  }, [getWorkingDir]);
+  }, []); // All callbacks accessed via callbacksRef.current — no dependencies needed
 
   // Reconnect on tab visibility change (mobile / background tab fix)
   useEffect(() => {
@@ -368,6 +468,12 @@ export function useSessionEvents({
   }, [listenToSession]);
 
   const stopListening = useCallback(() => {
+    if (rafRef.current !== null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+    deltaBufferRef.current = new Map();
+    if (loadingCheckTimerRef.current) {
+      clearInterval(loadingCheckTimerRef.current);
+      loadingCheckTimerRef.current = null;
+    }
     if (abortRef.current) {
       abortRef.current.abort();
       abortRef.current = null;

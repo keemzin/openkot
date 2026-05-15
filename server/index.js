@@ -12,9 +12,9 @@ import os from 'os';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
-// Import permission module (matches OpenChamber pattern)
+// Import permission module (matches OpenChamber pattern) - autopilot functionality removed
 const permissionModule = await import('./permission.js');
-const { createPermissionRoutes } = permissionModule;
+// const { createPermissionRoutes } = permissionModule; // autopilot routes removed
 
 // ── Load .env ──────────────────────────────────────────────────────────────
 const envPath = path.join(PROJECT_ROOT, '.env');
@@ -817,7 +817,7 @@ async function start() {
       if (!rawPath) return res.status(400).json({ error: 'path required' });
       const targetPath = path.isAbsolute(rawPath) ? rawPath : path.resolve(WORKING_DIR, rawPath);
       console.log('[fs/write] writing to:', targetPath);
-      fs.writeFileSync(targetPath, content, 'utf8');
+      await fs.promises.writeFile(targetPath, content, 'utf8');
       console.log('[fs/write] written successfully');
       res.json({ success: true, path: targetPath.replace(/\\/g, '/') });
     } catch (err) {
@@ -1444,6 +1444,28 @@ async function start() {
     ]);
   });
 
+  // Permission rules — exposes the "permission" section from opencode.jsonc
+  app.get('/api/config/permissions', (req, res) => {
+    try {
+      const scope = req.query.scope;
+      const config = readConfig(scope);
+      const permission = config.permission || {};
+      // Flatten to { tool: rule } pairs, handling object rules like "edit": { "*.env": "deny" }
+      const flat = {};
+      for (const [key, val] of Object.entries(permission)) {
+        if (typeof val === 'string') {
+          flat[key] = val;
+        } else if (typeof val === 'object' && val !== null) {
+          // Pattern-based rules (e.g. "edit": { "*": "ask", "*.env": "deny" })
+          flat[key] = { patterns: val };
+        }
+      }
+      res.json(flat);
+    } catch (e) {
+      res.json({});
+    }
+  });
+
   // Commands management
   app.get('/api/config/commands', (req, res) => {
     try {
@@ -1597,8 +1619,8 @@ ${content}`;
 
   setupProxy(app);
 
-  // Permission routes — registered after proxy but pathFilter excludes them
-  createPermissionRoutes(app, { OPENCODE_HOST, OPENCODE_PORT });
+   // Permission routes — registered after proxy but pathFilter excludes them
+   // createPermissionRoutes(app, { OPENCODE_HOST, OPENCODE_PORT }); // autopilot routes removed
 
   // Serve built frontend in production (when dist/ exists)
   const distPath = path.join(PROJECT_ROOT, 'dist');

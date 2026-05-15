@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
+import React, { useState, useEffect, useRef, useCallback, Suspense } from 'react';
 import { flushSync } from 'react-dom';
 import { marked } from 'marked';
 
@@ -10,9 +10,8 @@ import { TokenUsageIndicator } from './components/ui/TokenUsageIndicator';
 import { uid, getContextUsage, fallbackCopy } from './utils/helpers';
 import { useSessionEvents } from './hooks/useSessionEvents';
 import { getClient } from './lib/opencode';
-import { ChatMessage } from './components/chat/ChatMessage';
-import { ToolGroup } from './components/chat/ToolGroup';
-import { Markdown } from './components/chat/Markdown';
+import { useStreamingStore } from './stores/streamingStore';
+import { ChatMessages } from './components/chat/ChatMessages';
 import { DirPicker } from './components/app/DirPicker';
 import { FontPicker } from './components/app/FontPicker';
 import { Sidebar } from './components/Sidebar';
@@ -59,8 +58,8 @@ import { RightPanel } from './components/ui/RightPanel';
 // Git status
 
 
-import { QuestionCard, type QuestionRequest } from './components/app/QuestionCard';
-import { PermissionCard, type PermissionRequest } from './components/app/PermissionCard';
+import type { QuestionRequest } from './components/app/QuestionCard';
+import type { PermissionRequest } from './components/app/PermissionCard';
 import { SessionItem, type SessionInfo } from './components/app/SessionItem';
 import { PlanView } from './components/app/PlanView';
 import { InstancesPanel } from './components/app/InstancesPanel';
@@ -82,8 +81,6 @@ function extractPlanPathFromParts(parts: Part[]): string | null {
 function App() {
   const [inputText, setInputText] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
-  const [partsMap, setPartsMap] = useState<Record<string, Part[]>>({});
-  const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [busySessions, setBusySessions] = useState<Set<string>>(new Set());
   const [models, setModels] = useState<ModelInfo[]>([]);
@@ -119,36 +116,18 @@ function App() {
   useEffect(() => { sessionAutoAcceptRef.current = sessionAutoAccept; }, [sessionAutoAccept]);
   useEffect(() => { localStorage.setItem(LS_AUTO_ACCEPT, JSON.stringify(sessionAutoAccept)); }, [sessionAutoAccept]);
 
-  // Helper to check if current session has auto-accept enabled
-  // Falls back to pending state when no session exists yet
-  const isCurrentSessionAutoAccept = () => {
-    if (sessionId) return !!sessionAutoAccept[sessionId];
-    return !!sessionAutoAccept[PENDING_SESSION_KEY];
-  };
+   // Helper to check if current session has auto-accept enabled
+   // Autopilot feature coming soon - always returns false for now
+   const isCurrentSessionAutoAccept = () => {
+     return false; // Autopilot feature coming soon
+   };
 
-  // Toggle auto-accept for current session (or pending state for new sessions)
-  const toggleAutoAccept = () => {
-    const key = sessionId ?? PENDING_SESSION_KEY;
-    const next = !sessionAutoAccept[key];
-    console.log('toggleAutoAccept', { sessionId: key, next });
-    setSessionAutoAccept(prev => {
-      if (next) {
-        return { ...prev, [key]: true };
-      } else {
-        const { [key]: _, ...rest } = prev;
-        return rest;
-      }
-    });
-    // Only notify server if we have a real session ID
-    if (sessionId) {
-      fetch('/api/notifications/auto-accept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, enabled: next }),
-      }).then(() => console.log('auto-accept sent to server', { sessionId, enabled: next }))
-        .catch(() => {});
-    }
-  };
+   // Toggle auto-accept for current session (or pending state for new sessions)
+   // Coming soon feature - button remains but functionality disabled
+   const toggleAutoAccept = () => {
+     // Feature coming soon - no-op for now
+     console.log('Autopilot feature coming soon');
+   };
   // Permissions - persisted to localStorage for recovery after refresh
   const LS_PERMISSIONS = 'oc_permissions';
   const [permissions, setPermissions] = useState<Record<string, PermissionRequest[]>>({});
@@ -277,16 +256,15 @@ function App() {
   const [activeTab, setActiveTab] = useState<'chat' | 'plan' | 'terminal' | 'instances'>('chat');
   const [sessionPlanPaths, setSessionPlanPaths] = useState<Record<string, string>>({});
   const [commands, setCommands] = useState<{ name: string; description: string; template: string }[]>([]);
+  const [permissionRules, setPermissionRules] = useState<Record<string, string>>({});
   const [showCmdDropdown, setShowCmdDropdown] = useState(false);
   const [cmdFilter, setCmdFilter] = useState('');
   const [cmdSelectedIndex, setCmdSelectedIndex] = useState(0);
   const [questions, setQuestions] = useState<Record<string, QuestionRequest[]>>({});
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
-  const isNearBottomRef = useRef(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sessionIdRef = useRef<string | null>(null);
+  const pendingModelRestoreRef = useRef<string | null>(null);
 
   // Keep ref in sync with state so callbacks always see latest value
   useEffect(() => {
@@ -299,8 +277,8 @@ function App() {
     sessionAutoAcceptRef,
     getWorkingDir,
     onMessageUpdate: (updater) => setMessages(updater),
-    onPartsUpdate: (updater) => setPartsMap(updater),
-    onStreamingMsgId: (id) => setStreamingMsgId(id),
+    onPartsUpdate: (updater) => useStreamingStore.getState().setPartsMap(updater),
+    onStreamingMsgId: (id) => useStreamingStore.getState().setStreamingMsgId(id),
     onBusySessions: (updater) => setBusySessions(updater),
     onError: (error) => setError(error),
     onLoading: (loading) => setIsLoading(loading),
@@ -308,22 +286,6 @@ function App() {
     onPermissionsUpdate: (updater) => setPermissions(updater),
     onSessionIdle: () => loadSessions(),
   });
-
-  // Track scroll position — don't auto-scroll if user scrolled up
-  const handleChatScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    const threshold = 70;
-    isNearBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
-  }, []);
-
-  // Smart auto-scroll: only force to bottom when near bottom or for permissions/questions
-  useEffect(() => {
-    const hasPermissions = Object.values(permissions).some(arr => arr.length > 0);
-    const hasQuestions = Object.values(questions).some(arr => arr.length > 0);
-    if (isNearBottomRef.current || hasPermissions || hasQuestions) {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, partsMap, permissions, questions]);
 
   // Close model dropdown on outside click
   useEffect(() => {
@@ -349,6 +311,16 @@ function App() {
     localStorage.setItem(LS_SESSION_MODEL_SELECTIONS, JSON.stringify(sessionModelSelections));
   }, [sessionModelSelections]);
 
+  // Re-apply saved model when models arrive late (after switchSession ran too early)
+  useEffect(() => {
+    if (models.length === 0 || !pendingModelRestoreRef.current) return;
+    const model = models.find(m => m.id === pendingModelRestoreRef.current);
+    if (model) {
+      setSelectedModel(model);
+      pendingModelRestoreRef.current = null;
+    }
+  }, [models]);
+
   // Fetch commands on mount ” wait until opencode is ready
 
 
@@ -361,18 +333,19 @@ function App() {
     }).catch(() => {});
   }, []);
 
-  // Detect plan file path from tool parts ” watches for write/edit to PLAN.md
+  // Detect plan file path from tool parts — watches for write/edit to PLAN.md
   useEffect(() => {
     if (!sessionId) return;
     if (sessionPlanPaths[sessionId]) return;
-    for (const parts of Object.values(partsMap)) {
+    const currentPartsMap = useStreamingStore.getState().partsMap;
+    for (const parts of Object.values(currentPartsMap)) {
       const found = extractPlanPathFromParts(parts as Part[]);
       if (found) {
         setSessionPlanPaths(prev => ({ ...prev, [sessionId]: found }));
         return;
       }
     }
-  }, [sessionId, partsMap, sessionPlanPaths]);
+  }, [sessionId, sessionPlanPaths]);
   // Main startup effect: load config, then wait for opencode to be ready
   useEffect(() => {
     // 1. Load basic server config (workingDir)
@@ -441,13 +414,25 @@ function App() {
           setDirSessionsMap({ ...map });
         })();
 
-        // Fetch commands and models
-        getClient().then(client => client.command.list({ directory: _workingDir })).then((resp: any) => {
-          // v2 SDK returns { data: { value: [...], Count: N } } or { value: [...] }
-          const body = resp?.data ?? resp;
-          const arr: any[] = Array.isArray(body) ? body : (body?.value ?? []);
-          setCommands(arr.map((c: any) => ({ name: c.name, description: c.description, template: c.template })));
-        }).catch(() => {});
+        // Fetch commands from SDK and file-based commands
+        Promise.all([
+          getClient().then(client => client.command.list({ directory: _workingDir })).then((resp: any) => {
+            const body = resp?.data ?? resp;
+            const arr: any[] = Array.isArray(body) ? body : (body?.value ?? []);
+            return arr.map((c: any) => ({ name: c.name, description: c.description, template: c.template }));
+          }).catch(() => [] as { name: string; description: string; template: string }[]),
+          fetch('/api/config/commands').then(r => r.json()).then((arr: any[]) =>
+            arr.map((c: any) => ({ name: c.name, description: c.description, template: c.content }))
+          ).catch(() => [] as { name: string; description: string; template: string }[]),
+        ]).then(([sdkCommands, fileCommands]) => {
+          const merged = [...sdkCommands];
+          for (const fc of fileCommands) {
+            if (!merged.some(c => c.name === fc.name)) {
+              merged.push(fc);
+            }
+          }
+          setCommands(merged);
+        });
         // Load models — wait for workingDir so opencode is ready before hitting provider list
         getClient().then(client => client.provider.list({ directory: _workingDir })).then((resp: any) => {
           // v2 SDK: response is { data: { all, connected, default } } OR unwrapped { all, connected, default }
@@ -471,6 +456,8 @@ function App() {
           list.sort((a, b) => { if (a.isFree !== b.isFree) return a.isFree ? -1 : 1; if (a.isDefault !== b.isDefault) return a.isDefault ? -1 : 1; return a.name.localeCompare(b.name); });
           setModels(list); setSelectedModel(list[0] ?? null);
         }).catch((err: any) => { console.error('[provider.list] error:', err); });
+        // Load permission rules from config
+        fetch('/api/config/permissions').then(r => r.json()).then(setPermissionRules).catch(() => {});
       });
     }).catch(() => {});
   }, []);
@@ -591,7 +578,7 @@ function App() {
         msgs.push({ id: rec.info.id, role: rec.info.role, content: '', tokens: rec.info.tokens, model: rec.info.modelID ?? rec.info.model ?? undefined });
         pm[rec.info.id] = rec.parts ?? [];
       }
-      setMessages(msgs); setPartsMap(pm);
+      setMessages(msgs); useStreamingStore.getState().setPartsMap(pm);
     } catch {}
   }, []);
 
@@ -606,7 +593,7 @@ function App() {
     const dir = getWorkingDir();
     const client = await getClient();
     await client.session.delete({ sessionID: id, directory: dir }).catch(() => {});
-    if (sessionId === id) { setSessionId(null); setMessages([]); setPartsMap({}); }
+    if (sessionId === id) { setSessionId(null); setMessages([]); useStreamingStore.getState().setPartsMap({}); }
     await loadSessions();
   }, [loadSessions, sessionId]);
 
@@ -621,20 +608,20 @@ function App() {
       if (forkedData?.id) {
         await loadSessions();
         stopListening();
-        setIsLoading(false); setError(null); setStreamingMsgId(null);
-        setSessionId(forkedData.id); setMessages([]); setPartsMap({});
+        setIsLoading(false); setError(null); useStreamingStore.getState().setStreamingMsgId(null);
+        setSessionId(forkedData.id); setMessages([]); useStreamingStore.getState().setPartsMap({});
         await loadSessionMessages(forkedData.id);
       }
     } catch { /* ignore */ }
   }, [loadSessions, loadSessionMessages]);
 
   const revertSession = useCallback(async (messageId: string) => {
-    // Collect files touched by messages after the revert point
+    const currentPartsMap = useStreamingStore.getState().partsMap;
     const idx = messages.findIndex(m => m.id === messageId);
     const affectedMsgs = idx >= 0 ? messages.slice(idx) : [];
     const fileSet = new Set<string>();
     for (const m of affectedMsgs) {
-      const parts = partsMap[m.id] ?? [];
+      const parts = currentPartsMap[m.id] ?? [];
       for (const p of parts) {
         const toolName = (p.tool as string) || p.type;
         const isFileWrite = toolName === 'write' || toolName === 'edit' || toolName === 'patch';
@@ -646,19 +633,18 @@ function App() {
       }
     }
 
-    // Find the user message that preceded this assistant message — prefill it after revert
     const msgIdx = messages.findIndex(m => m.id === messageId);
     let prefillText: string | undefined;
     if (msgIdx > 0) {
       const prevMsg = messages[msgIdx - 1];
       if (prevMsg?.role === 'user') {
-        const userParts = partsMap[prevMsg.id] ?? [];
+        const userParts = currentPartsMap[prevMsg.id] ?? [];
         prefillText = userParts.filter(p => p.type === 'text').map(p => p.text ?? '').join('').trim() || undefined;
       }
     }
 
     setRevertConfirm({ messageId, affectedFiles: Array.from(fileSet), prefillText });
-  }, [messages, partsMap]);
+  }, [messages]);
 
   const doRevert = useCallback(async (messageId: string, prefillText?: string) => {
     const sid = sessionIdRef.current;
@@ -670,7 +656,7 @@ function App() {
       const idx = prev.findIndex(m => m.id === messageId);
       return idx >= 0 ? prev.slice(0, idx) : prev;
     });
-    setPartsMap(prev => {
+    useStreamingStore.getState().setPartsMap(prev => {
       const keepIds = new Set(messages.slice(0, messages.findIndex(m => m.id === messageId)).map(m => m.id));
       const next: Record<string, Part[]> = {};
       for (const k of Object.keys(prev)) {
@@ -699,8 +685,8 @@ function App() {
 
   const switchSession = useCallback(async (sid: string) => {
     stopListening();
-    setIsLoading(false); setError(null); setStreamingMsgId(null);
-    setSessionId(sid); setMessages([]); setPartsMap({});
+    setIsLoading(false); setError(null); useStreamingStore.getState().setStreamingMsgId(null);
+    setSessionId(sid); setMessages([]); useStreamingStore.getState().setPartsMap({});
     setActiveTab('chat');
 
     // Restore model selection for this session
@@ -708,6 +694,8 @@ function App() {
     if (savedModelId && models.length > 0) {
       const model = models.find(m => m.id === savedModelId);
       if (model) setSelectedModel(model);
+    } else if (savedModelId) {
+      pendingModelRestoreRef.current = savedModelId;
     }
 
     await loadSessionMessages(sid);
@@ -754,8 +742,8 @@ function App() {
 
   const newSession = useCallback(() => {
     stopListening();
-    setIsLoading(false); setError(null); setStreamingMsgId(null);
-    setSessionId(null); setMessages([]); setPartsMap({});
+    setIsLoading(false); setError(null); useStreamingStore.getState().setStreamingMsgId(null);
+    setSessionId(null); setMessages([]); useStreamingStore.getState().setPartsMap({});
   }, [stopListening]);
 
   const getOrCreateSession = useCallback(async (): Promise<string> => {
@@ -772,12 +760,6 @@ function App() {
     setSessionAutoAccept(prev => {
       if (!prev[PENDING_SESSION_KEY]) return prev;
       const { [PENDING_SESSION_KEY]: pending, ...rest } = prev;
-      // Notify server with the real session ID
-      fetch('/api/notifications/auto-accept', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: newId, enabled: true }),
-      }).catch(() => {});
       return { ...rest, [newId]: true };
     });
 
@@ -800,12 +782,10 @@ function App() {
       // Add to UI as a user message
       const tempId = `temp_user_${uid()}`;
       setMessages(prev => [...prev, { id: tempId, role: 'user', content: text }]);
-      setPartsMap(prev => ({ ...prev, [tempId]: [{ id: uid(), type: 'text', text }] }));
+      useStreamingStore.getState().setPartsMap(prev => ({ ...prev, [tempId]: [{ id: uid(), type: 'text', text }] }));
       
       try {
         const client = await getClient();
-        // Send as a regular prompt - OpenCode queues it and processes after current task
-        // The SSE listener is already active and will continue receiving updates
         await client.session.promptAsync({
           sessionID: sid,
           directory: getWorkingDir(),
@@ -813,12 +793,10 @@ function App() {
           parts: [{ type: 'text', text }],
           agent: selectedAgent,
         });
-        console.log('[queue] Message queued, will be processed after current task completes');
       } catch (err: any) {
         console.error('[queue] Failed to send:', err);
-        // Remove the optimistic message on error
         setMessages(prev => prev.filter(m => m.id !== tempId));
-        setPartsMap(prev => {
+        useStreamingStore.getState().setPartsMap(prev => {
           const next = { ...prev };
           delete next[tempId];
           return next;
@@ -850,7 +828,7 @@ function App() {
     // Optimistic user message ” temp ID, will be replaced by server's real ID via SSE
     const tempUserMsgId = `temp_user_${uid()}`;
     setMessages(prev => [...prev, { id: tempUserMsgId, role: 'user', content: text }]);
-    setPartsMap(prev => ({ ...prev, [tempUserMsgId]: [{ id: uid(), type: 'text', text }] }));
+    useStreamingStore.getState().setPartsMap(prev => ({ ...prev, [tempUserMsgId]: [{ id: uid(), type: 'text', text }] }));
     setInputText('');
     setShowCmdDropdown(false);
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
@@ -859,16 +837,18 @@ function App() {
     // Placeholder for "Thinking" ” will be replaced by real assistant message via SSE
     const tempAssistantId = `temp_asst_${uid()}`;
     setMessages(prev => [...prev, { id: tempAssistantId, role: 'assistant', content: '' }]);
-    setStreamingMsgId(tempAssistantId);
+    useStreamingStore.getState().setStreamingMsgId(tempAssistantId);
 
+    let sid: string | undefined;
     try {
-      const sid = await getOrCreateSession();
-      const dir = getWorkingDir();
+      sid = await getOrCreateSession();
       const client = await getClient();
       const resp: any = await client.session.promptAsync({
         sessionID: sid,
-        directory: dir,
-        model: { providerID: selectedModel.providerId, modelID: selectedModel.id },
+        model: {
+          providerID: selectedModel.providerId,
+          modelID: selectedModel.id,
+        },
         parts: [{ type: 'text', text: finalText }],
         agent: selectedAgent,
       });
@@ -880,12 +860,25 @@ function App() {
       // Only start listening after confirming the prompt was accepted
       listenToSession(sid, tempAssistantId);
     } catch (err: any) {
+      // "signal is aborted without reason" is a browser quirk that fires when
+      // the SDK internally cancels its own signal after a response is received.
+      // It's not a real error — the prompt was accepted, so just start listening.
+      const isTimeout = typeof err?.message === 'string' && /timeout/i.test(err.message);
+      const isSpuriousAbort = !isTimeout && (
+        err?.name === 'AbortError' ||
+        (typeof err?.message === 'string' && err.message.toLowerCase().includes('aborted'))
+      );
+      if (isSpuriousAbort && sid) {
+        console.warn('[sendMessage] ignoring spurious abort signal, starting listener anyway');
+        listenToSession(sid, tempAssistantId);
+        return;
+      }
       const msg = err?.data?.message ?? err?.message ?? 'Failed to send message';
       console.error('[sendMessage] error:', err);
       setError(msg);
       setMessages(prev => prev.filter(m => m.id !== tempAssistantId && m.id !== tempUserMsgId));
       setIsLoading(false);
-      setStreamingMsgId(null);
+      useStreamingStore.getState().setStreamingMsgId(null);
       stopListening();
     }
   };
@@ -925,15 +918,13 @@ function App() {
     // Close SSE locally
     stopListening();
 
-    // Mark the streaming message as stopped
-    const stoppedId = streamingMsgId;
+    const stoppedId = useStreamingStore.getState().streamingMsgId;
     setIsLoading(false);
-    setStreamingMsgId(null);
+    useStreamingStore.getState().setStreamingMsgId(null);
 
     if (stoppedId) {
-      setPartsMap(prev => {
+      useStreamingStore.getState().setPartsMap(prev => {
         const existing = prev[stoppedId] ?? [];
-        // If no text content yet, add a stopped indicator
         const hasText = existing.some(p => p.type === 'text' && (p.text ?? '').trim().length > 0);
         if (!hasText) {
           return { ...prev, [stoppedId]: [...existing, { id: 'stopped', type: 'text', text: '*(stopped)*' }] };
@@ -1288,143 +1279,22 @@ function App() {
         ) : activeTab === 'instances' ? (
           <InstancesPanel currentPort={window.location.port ? parseInt(window.location.port) : 80} />
         ) : activeTab !== 'terminal' && (
-          /* Chat view ” shown when chat tab is active */
-          <div ref={chatContainerRef} onScroll={handleChatScroll} style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-            <div style={{ width: '100%', maxWidth: 760, margin: '0 auto', padding: '12px 16px 80px', display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
-              {messages.length === 0 && (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-4)', gap: 8, paddingTop: 80 }}>
-              <svg width="40" height="40" viewBox="0 0 100 100" fill="none" opacity={0.3}>
-                <path d="M50 50 L8.432 26 L8.432 74 L50 98 Z" fill="rgba(255,255,255,0.08)" stroke="#CECDC3" strokeWidth="2.5" strokeLinejoin="round"/>
-                <path d="M50 50 L91.568 26 L91.568 74 L50 98 Z" fill="rgba(255,255,255,0.08)" stroke="#CECDC3" strokeWidth="2.5" strokeLinejoin="round"/>
-                <path d="M50 2 L8.432 26 L50 50 L91.568 26 Z" fill="none" stroke="#CECDC3" strokeWidth="2.5" strokeLinejoin="round"/>
-              </svg>
-              <span style={{ fontSize: 14 }}>Start a conversation</span>
-            </div>
+          <ChatMessages
+            messages={messages}
+            models={models}
+            sessionId={sessionId}
+            sessionAutoAccept={sessionAutoAccept}
+            permissionRules={permissionRules}
+            questions={questions}
+            permissions={permissions}
+            error={error}
+            onFork={forkSession}
+            onRevert={revertSession}
+            onReplyToQuestion={replyToQuestion}
+            onRejectQuestion={rejectQuestion}
+            onReplyToPermission={replyToPermission}
+          />
           )}
-
-          {(() => {
-            // Group consecutive assistant messages into turns.
-            // Each turn = one Trail (all tools) + all text responses.
-            // User messages break turns.
-            type Turn = { msgs: typeof messages };
-            const turns: Turn[] = [];
-            for (const msg of messages) {
-              if (msg.role === 'user') {
-                turns.push({ msgs: [msg] });
-              } else {
-                const last = turns[turns.length - 1];
-                if (last && last.msgs[0].role === 'assistant') {
-                  last.msgs.push(msg);
-                } else {
-                  turns.push({ msgs: [msg] });
-                }
-              }
-            }
-            return turns.map((turn, ti) => {
-              if (turn.msgs[0].role === 'user') {
-                const msg = turn.msgs[0];
-                const isLastTurn = ti === turns.length - 1;
-                return <ChatMessage key={msg.id} msg={msg} parts={partsMap[msg.id]} isStreaming={msg.id === streamingMsgId} onFork={forkSession} onRevert={!isLastTurn ? revertSession : undefined} />;
-              }
-              // Assistant turn — ONE Trail for all tool activity, ONE final text response
-              // Collect all trail parts (tools + interleaved justification text) across all messages
-              const SKIP_TOOLS = new Set(['step-start', 'step_start', 'reasoning', 'thinking', 'snapshot']);
-              const allTrailParts: any[] = [];
-              let finalTextMsg: any = null;
-              let finalTailTextParts: any[] = [];
-
-              for (const m of turn.msgs) {
-                const mParts = partsMap[m.id] ?? [];
-                const lastToolIdx = mParts.reduce((acc: number, p: any, i: number) =>
-                  (p.type === 'tool' && !SKIP_TOOLS.has((p.tool ?? p.toolName ?? '').toLowerCase())) ? i : acc, -1);
-
-                if (lastToolIdx >= 0) {
-                  // Everything up to and including last real tool → Trail
-                  const trailSlice = mParts.slice(0, lastToolIdx + 1).filter((p: any) => {
-                    if (p.type === 'tool') return !SKIP_TOOLS.has((p.tool ?? p.toolName ?? '').toLowerCase());
-                    return p.type === 'text'; // keep interleaved text as justification
-                  });
-                  allTrailParts.push(...trailSlice);
-                  // Text after last tool = candidate final response
-                  const tail = mParts.slice(lastToolIdx + 1).filter((p: any) => p.type === 'text');
-                  if (tail.length > 0) { finalTailTextParts = tail; finalTextMsg = m; }
-                } else {
-                  // No tools in this message — it's a pure text response
-                  const textParts = mParts.filter((p: any) => p.type === 'text');
-                  const text = textParts.map((p: any) => p.text ?? '').join('') || m.content;
-                  if (text.trim().length > 0 || m.id === streamingMsgId) {
-                    finalTailTextParts = textParts.length > 0 ? textParts : [];
-                    finalTextMsg = m;
-                  }
-                }
-              }
-              // streaming message with no parts yet
-              if (!finalTextMsg && turn.msgs.length > 0) {
-                const last = turn.msgs[turn.msgs.length - 1];
-                if (last.id === streamingMsgId) { finalTextMsg = last; finalTailTextParts = []; }
-              }
-              return (
-                <div key={`turn-${ti}`} style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {allTrailParts.length > 0 && (
-                    <div style={{ marginBottom: finalTextMsg ? 6 : 0 }}>
-                      <ToolGroup
-                        parts={allTrailParts}
-                        isStreaming={turn.msgs.some((m: any) => m.id === streamingMsgId)}
-                        modelName={(() => {
-                          // Use model from the last assistant message that has one
-                          const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
-                          if (!modelId) return undefined;
-                          const found = models.find(m => m.id === modelId);
-                          return found?.name ?? modelId;
-                        })()}
-                        providerName={(() => {
-                          const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
-                          if (!modelId) return undefined;
-                          return models.find(m => m.id === modelId)?.providerName;
-                        })()}
-                      />
-                    </div>
-                  )}
-                  {finalTextMsg && (
-                    <ChatMessage
-                      msg={finalTextMsg}
-                      parts={finalTailTextParts.length > 0 ? finalTailTextParts : (partsMap[finalTextMsg.id] ?? []).filter((p: any) => p.type === 'text')}
-                      isStreaming={finalTextMsg.id === streamingMsgId}
-                      hideTools
-                      modelName={(() => {
-                        const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
-                        if (!modelId) return undefined;
-                        const found = models.find(m => m.id === modelId);
-                        return found?.name ?? modelId;
-                      })()}
-                      providerName={(() => {
-                        const modelId = [...turn.msgs].reverse().find((m: any) => m.model)?.model;
-                        if (!modelId) return undefined;
-                        return models.find(m => m.id === modelId)?.providerName;
-                      })()}
-                    />
-                  )}
-                </div>
-              );
-            });
-          })()}
-
-          {/* Render pending questions for current session */}
-          {sessionId && questions[sessionId]?.map(q => (
-            <QuestionCard key={q.id} question={q} onReply={replyToQuestion} onReject={rejectQuestion} />
-          ))}
-
-          {/* Render pending permissions for current session */}
-          {sessionId && permissions[sessionId]?.filter(p => !sessionAutoAccept[sessionId])?.map(p => (
-            <PermissionCard key={p.id} permission={p} onReply={replyToPermission} />
-          ))}
-          {error && (
-            <div style={{ padding: '8px 12px', background: '#2a1a1a', border: '1px solid #5a2a2a', borderRadius: 8, color: 'var(--red)', fontSize: 13 }}>{error}</div>
-          )}
-              <div ref={messagesEndRef} />
-            </div>{/* end max-width wrapper */}
-          </div>
-        )}
 
          {/* Input — hidden when not on chat tab */}
          {activeTab === 'chat' && (
@@ -1502,29 +1372,25 @@ function App() {
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', padding: '4px 10px 8px' }}>
               {/* Right: agent selector + model selector + send */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                {/* Autopilot toggle */}
-                <button
-                  onClick={toggleAutoAccept}
-                  title={isCurrentSessionAutoAccept() ? "Autopilot: executes tools automatically" : "Permission: asks before executing tools"}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 5,
-                    background: isCurrentSessionAutoAccept() ? 'rgba(74, 157, 95, 0.1)' : 'transparent',
-                    border: isCurrentSessionAutoAccept() ? '1px solid rgba(74, 157, 95, 0.2)' : '1px solid var(--border-2)',
-                    cursor: 'pointer',
-                    padding: '3px 8px', borderRadius: 6,
-                    color: isCurrentSessionAutoAccept() ? '#4a9d5f' : 'var(--text-4)',
-                    fontSize: 11, fontFamily: 'inherit', fontWeight: 500,
-                  }}
-                >
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}>
-                    {isCurrentSessionAutoAccept() ? (
-                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-                    ) : (
-                      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z M12 8v4 M12 16h.01" />
-                    )}
-                  </svg>
-                  {isCurrentSessionAutoAccept() ? 'Autopilot' : 'Permission'}
-                </button>
+                 {/* Permission toggle (autopilot coming soon) */}
+                 <button
+                   onClick={toggleAutoAccept}
+                   title="Permission: asks before executing tools (autopilot coming soon)"
+                   style={{
+                     display: 'flex', alignItems: 'center', gap: 5,
+                     background: 'transparent',
+                     border: '1px solid var(--border-2)',
+                     cursor: 'pointer',
+                     padding: '3px 8px', borderRadius: 6,
+                     color: 'var(--text-4)',
+                     fontSize: 11, fontFamily: 'inherit', fontWeight: 500,
+                   }}
+                 >
+                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}>
+                     <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z M12 8v4 M12 16h.01" />
+                   </svg>
+                   Permission
+                 </button>
 
                 {/* Agent selector */}
                 <AgentSelector

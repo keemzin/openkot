@@ -10,9 +10,10 @@ export type PermissionRequest = {
 type PermissionCardProps = {
   permission: PermissionRequest;
   onReply: (requestID: string, response: 'once' | 'always' | 'reject') => Promise<void>;
+  configRule?: string | { patterns: Record<string, string> };
 };
 
-export function PermissionCard({ permission, onReply }: PermissionCardProps) {
+export function PermissionCard({ permission, onReply, configRule }: PermissionCardProps) {
   const [isResponding, setIsResponding] = useState(false);
 
   const handleResponse = async (response: 'once' | 'always' | 'reject') => {
@@ -25,6 +26,26 @@ export function PermissionCard({ permission, onReply }: PermissionCardProps) {
 
   const tool = permission.permission.toLowerCase();
   const meta = permission.metadata || {};
+
+  const renderRule = () => {
+    if (!configRule) return null;
+    if (typeof configRule === 'string') {
+      const label = { allow: '✅ allow', ask: '⚠️ ask', deny: '❌ deny' }[configRule] || configRule;
+      return <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-4)' }}>Config: {label}</span>;
+    }
+    if (configRule.patterns) {
+      const relevant = Object.entries(configRule.patterns).find(([pattern]) => {
+        if (pattern === '*') return true;
+        if (meta.path && meta.path.endsWith(pattern.replace('*', ''))) return true;
+        if (meta.file_path && meta.file_path.endsWith(pattern.replace('*', ''))) return true;
+        return false;
+      });
+      const rule = relevant?.[1] || 'ask';
+      const label = { allow: '✅ allow', ask: '⚠️ ask', deny: '❌ deny' }[rule] || rule;
+      return <span style={{ fontSize: 11, fontFamily: 'monospace', color: 'var(--text-4)' }}>Config: {label}</span>;
+    }
+    return null;
+  };
   
   // Simplified rendering for opencode-gui
   const renderContent = () => {
@@ -51,7 +72,8 @@ export function PermissionCard({ permission, onReply }: PermissionCardProps) {
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><circle cx="12" cy="12" r="3"/>
         </svg>
         <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--accent)' }}>Permission Required</span>
-        <span style={{ fontSize: 12, color: 'var(--text-4)', marginLeft: 'auto', fontFamily: 'monospace' }}>{permission.permission}</span>
+        <span style={{ fontSize: 12, color: 'var(--text-4)', fontFamily: 'monospace' }}>{permission.permission}</span>
+        <span style={{ marginLeft: 'auto' }}>{renderRule()}</span>
       </div>
 
       <div style={{ marginBottom: 10 }}>
