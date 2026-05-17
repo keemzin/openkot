@@ -2,7 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import express from 'express';
-import { getState, restartOpenCode, setWorkingDir } from '../lib/opencode-process.js';
+import { getState, restartOpenCode, forceRestartOpenCode, setWorkingDir } from '../lib/opencode-process.js';
 import { WORKING_DIR, OPENCODE_PORT, OPENCODE_HOST } from '../lib/env.js';
 
 export default function registerAppRoutes(app) {
@@ -51,6 +51,9 @@ export default function registerAppRoutes(app) {
     try { await fs.promises.access(resolved); } catch { return res.status(400).json({ error: 'Directory not found' }); }
     setWorkingDir(resolved);
     res.json({ workingDir: resolved.replace(/\\/g, '/') });
+    forceRestartOpenCode(resolved).catch(err => {
+      console.error('[switch-dir] Restart failed:', err.message);
+    });
   });
 
   app.post('/restart', (_req, res) => {

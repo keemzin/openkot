@@ -237,4 +237,9 @@ async function restartOpenCode(cwd) {
   return currentRestartPromise;
 }
 
+export async function forceRestartOpenCode(cwd) {
+  currentRestartPromise = null;
+  return restartOpenCode(cwd);
+}
+
 export { startOpenCode, restartOpenCode, killOpenCode };
