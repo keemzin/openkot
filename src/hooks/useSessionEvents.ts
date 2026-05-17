@@ -28,6 +28,13 @@ const SAFETY_POLL_INTERVAL = 3000;
  */
 const RECONNECT_STABILITY_DELAY = 2000;
 
+/**
+ * If SSE has been silent longer than this (ms), force cleanup even if
+ * session.status claims the session is still busy. Prevents permanent
+ * hangs when the SSE stream silently dies but the server thinks it's busy.
+ */
+const FORCE_CLEANUP_TIMEOUT = 30000;
+
 export function useSessionEvents(options: SessionEventsOptions) {
   const {
     sessionAutoAcceptRef: _sessionAutoAcceptRef,
@@ -65,6 +72,9 @@ export function useSessionEvents(options: SessionEventsOptions) {
   // Tracks when the SSE stream last delivered any event — used by safety poll
   // to distinguish "SSE is alive but session is idle (delegation)" from "SSE is dead"
   const lastSseEventRef = useRef<number>(Date.now());
+
+  // Tracks when SSE silence started — used by stuck-busy force cleanup
+  const stuckStartRef = useRef<number>(0);
 
   const cleanupSession = useCallback((sid: string, error?: string | null) => {
     const cbs = callbacksRef.current;
@@ -116,7 +126,25 @@ export function useSessionEvents(options: SessionEventsOptions) {
         // This is critical: during delegation the parent goes idle on purpose,
         // and the safety poll must not kill it while SSE is alive.
         const sseAliveMs = Date.now() - lastSseEventRef.current;
-        if (sseAliveMs < SAFETY_POLL_INTERVAL * 2) return;
+        if (sseAliveMs < SAFETY_POLL_INTERVAL * 2) {
+          stuckStartRef.current = 0;
+          return;
+        }
+
+        // Track when silence started
+        if (stuckStartRef.current === 0) stuckStartRef.current = Date.now();
+        const stuckMs = Date.now() - stuckStartRef.current;
+
+        // ── Force cleanup after FORCE_CLEANUP_TIMEOUT regardless of status ──
+        // This is the critical recovery: if SSE has been dead for 30s+,
+        // something is fundamentally broken — don't wait for the server.
+        if (stuckMs >= FORCE_CLEANUP_TIMEOUT) {
+          console.warn(`[useSessionEvents] force cleanup: SSE silent for ${(stuckMs / 1000).toFixed(0)}s`);
+          abort.abort();
+          abortRef.current = null;
+          cleanupSession(sid);
+          return;
+        }
 
         const client = await getClient();
         const resp: any = await client.session.status({ directory: dir });
@@ -183,242 +211,254 @@ export function useSessionEvents(options: SessionEventsOptions) {
             if (globalEvent == null || abort.signal.aborted) break;
             // Track SSE health — every received event resets the timer
             lastSseEventRef.current = Date.now();
+            stuckStartRef.current = 0;
             // Clear the reconnect stability timer since we got an event
             if (reconnectStabilityTimer) {
               clearTimeout(reconnectStabilityTimer);
               reconnectStabilityTimer = null;
             }
 
-          const cb = callbacksRef.current;
+            // Wrap event processing in try-catch so a malformed event
+            // doesn't break the entire stream and cause a hang.
+            try {
+              const cb = callbacksRef.current;
 
-          // v2 wraps events in { directory, payload }
-          const event = (globalEvent as any)?.payload ?? globalEvent;
-          const { type } = event as { type: string };
+              // v2 wraps events in { directory, payload }
+              const event = (globalEvent as any)?.payload ?? globalEvent;
+              const { type } = event as { type: string };
 
-          // ── Filter by session ──────────────────────────────────────────
-          const p = event.properties as any;
-          const evtSid: string | undefined =
-            p?.part?.sessionID ??
-            p?.info?.sessionID ??
-            p?.sessionID;
-          if (evtSid && evtSid !== sid) continue;
+              // ── Filter by session ──────────────────────────────────────────
+              const p = event.properties as any;
+              const evtSid: string | undefined =
+                p?.part?.sessionID ??
+                p?.info?.sessionID ??
+                p?.sessionID;
+              if (evtSid && evtSid !== sid) continue;
 
-          // ── message.part.delta (true streaming — buffer + rAF flush) ──
-          if (type === 'message.part.delta') {
-            const { messageID, partID, field, delta } = p as {
-              messageID: string; partID: string; field: string; delta: string;
-            };
-            if (field !== 'text' || !delta || !messageID || !partID) continue;
+              // ── message.part.delta (true streaming — buffer + rAF flush) ──
+              if (type === 'message.part.delta') {
+                const { messageID, partID, field, delta } = p as {
+                  messageID: string; partID: string; field: string; delta: string;
+                };
+                if (field !== 'text' || !delta || !messageID || !partID) continue;
 
-            cb.onStreamingMsgId(messageID);
+                cb.onStreamingMsgId(messageID);
 
-            // Buffer the delta — accumulate per messageID+partID
-            const buf = deltaBufferRef.current;
-            let partBuf = buf.get(messageID);
-            if (!partBuf) { partBuf = new Map(); buf.set(messageID, partBuf); }
-            partBuf.set(partID, (partBuf.get(partID) ?? '') + delta);
+                // Buffer the delta — accumulate per messageID+partID
+                const buf = deltaBufferRef.current;
+                let partBuf = buf.get(messageID);
+                if (!partBuf) { partBuf = new Map(); buf.set(messageID, partBuf); }
+                partBuf.set(partID, (partBuf.get(partID) ?? '') + delta);
 
-            // Schedule rAF flush if not already scheduled
-            if (rafRef.current === null) {
-              rafRef.current = requestAnimationFrame(() => {
-                rafRef.current = null;
-                const batch = deltaBufferRef.current;
-                deltaBufferRef.current = new Map();
-                if (batch.size > 0) {
-                  useStreamingStore.getState().applyDeltaBatch(batch);
+                // Schedule rAF flush if not already scheduled
+                if (rafRef.current === null) {
+                  rafRef.current = requestAnimationFrame(() => {
+                    rafRef.current = null;
+                    const batch = deltaBufferRef.current;
+                    deltaBufferRef.current = new Map();
+                    if (batch.size > 0) {
+                      useStreamingStore.getState().applyDeltaBatch(batch);
+                    }
+                  });
                 }
-              });
-            }
-            continue;
-          }
-
-          // ── message.part.updated ───────────────────────────────────────
-          if (type === 'message.part.updated') {
-            const part = p.part as Part;
-            if (!part?.id) continue;
-            const msgId = (part as any).messageID ?? tempId;
-
-            cb.onMessageUpdate(prev => {
-              if (prev.some(m => m.id === msgId)) return prev;
-              return prev.map(m => m.id === tempId ? { ...m, id: msgId } : m);
-            });
-            cb.onStreamingMsgId(msgId);
-            cb.onPartsUpdate(prev => {
-              const base = prev[msgId] ?? prev[tempId] ?? [];
-              const idx = base.findIndex(pp => pp.id === part.id);
-              const next = [...base];
-              if (idx >= 0) next[idx] = part;
-              else next.push(part);
-              const updated: Record<string, Part[]> = { ...prev, [msgId]: next };
-              if (msgId !== tempId) delete updated[tempId];
-              return updated;
-            });
-            continue;
-          }
-
-          // ── message.removed ────────────────────────────────────────────
-          // Fired by OpenCode after revert — remove the message from UI
-          if (type === 'message.removed') {
-            const removedId = p.messageID as string;
-            if (removedId) {
-              cb.onMessageUpdate(prev => prev.filter(m => m.id !== removedId));
-              cb.onPartsUpdate(prev => {
-                const next = { ...prev };
-                delete next[removedId];
-                return next;
-              });
-            }
-            continue;
-          }
-
-          // ── message.updated ────────────────────────────────────────────
-          if (type === 'message.updated') {
-            const info = p.info as any;
-            if (!info?.id) continue;
-
-            // Skip messages that OpenCode has marked as reverted
-            if (info.revert) continue;
-
-            cb.onMessageUpdate(prev => {
-              if (prev.some(m => m.id === info.id)) {
-                if (info.role === 'assistant' && (info.tokens || info.cost || info.modelID)) {
-                  return prev.map(m => m.id === info.id ? {
-                    ...m,
-                    tokens: info.tokens,
-                    cost: info.cost,
-                    model: info.modelID ?? info.model,
-                  } : m);
-                }
-                return prev;
+                continue;
               }
-              if (info.role === 'user') {
-                if (prev.some(m => m.id.startsWith('temp_user_'))) {
-                  const tempUserId = prev.find(m => m.id.startsWith('temp_user_'))?.id;
-                  if (tempUserId) {
-                    cb.onPartsUpdate((pm: Record<string, Part[]>) => {
-                      if (!pm[tempUserId]) return pm;
-                      const next: Record<string, Part[]> = { ...pm, [info.id]: pm[tempUserId] };
-                      delete next[tempUserId];
-                      return next;
-                    });
+
+              // ── message.part.updated ───────────────────────────────────────
+              if (type === 'message.part.updated') {
+                const part = p.part as Part;
+                if (!part?.id) continue;
+                const msgId = (part as any).messageID ?? tempId;
+
+                cb.onMessageUpdate(prev => {
+                  if (prev.some(m => m.id === msgId)) return prev;
+                  return prev.map(m => m.id === tempId ? { ...m, id: msgId } : m);
+                });
+                cb.onStreamingMsgId(msgId);
+                cb.onPartsUpdate(prev => {
+                  const base = prev[msgId] ?? prev[tempId] ?? [];
+                  const idx = base.findIndex(pp => pp.id === part.id);
+                  const next = [...base];
+                  if (idx >= 0) next[idx] = part;
+                  else next.push(part);
+                  const updated: Record<string, Part[]> = { ...prev, [msgId]: next };
+                  if (msgId !== tempId) delete updated[tempId];
+                  return updated;
+                });
+                continue;
+              }
+
+              // ── message.removed ────────────────────────────────────────────
+              // Fired by OpenCode after revert — remove the message from UI
+              if (type === 'message.removed') {
+                const removedId = p.messageID as string;
+                if (removedId) {
+                  cb.onMessageUpdate(prev => prev.filter(m => m.id !== removedId));
+                  cb.onPartsUpdate(prev => {
+                    const next = { ...prev };
+                    delete next[removedId];
+                    return next;
+                  });
+                }
+                continue;
+              }
+
+              // ── message.updated ────────────────────────────────────────────
+              if (type === 'message.updated') {
+                const info = p.info as any;
+                if (!info?.id) continue;
+
+                // Skip messages that OpenCode has marked as reverted
+                if (info.revert) continue;
+
+                cb.onMessageUpdate(prev => {
+                  if (prev.some(m => m.id === info.id)) {
+                    if (info.role === 'assistant' && (info.tokens || info.cost || info.modelID)) {
+                      return prev.map(m => m.id === info.id ? {
+                        ...m,
+                        tokens: info.tokens,
+                        cost: info.cost,
+                        model: info.modelID ?? info.model,
+                      } : m);
+                    }
+                    return prev;
                   }
-                  return prev.map(m => m.id.startsWith('temp_user_') ? { id: info.id, role: info.role, content: '' } : m);
-                }
+                  if (info.role === 'user') {
+                    if (prev.some(m => m.id.startsWith('temp_user_'))) {
+                      const tempUserId = prev.find(m => m.id.startsWith('temp_user_'))?.id;
+                      if (tempUserId) {
+                        cb.onPartsUpdate((pm: Record<string, Part[]>) => {
+                          if (!pm[tempUserId]) return pm;
+                          const next: Record<string, Part[]> = { ...pm, [info.id]: pm[tempUserId] };
+                          delete next[tempUserId];
+                          return next;
+                        });
+                      }
+                      return prev.map(m => m.id.startsWith('temp_user_') ? { id: info.id, role: info.role, content: '' } : m);
+                    }
+                  }
+                  if (info.role === 'assistant') {
+                    if (prev.some(m => m.id === tempId)) {
+                      return prev.map(m => m.id === tempId ? { id: info.id, role: info.role, content: '' } : m);
+                    }
+                  }
+                  return [...prev, { id: info.id, role: info.role, content: '' }];
+                });
+                if (info.role === 'assistant') cb.onStreamingMsgId(info.id);
+                continue;
               }
-              if (info.role === 'assistant') {
-                if (prev.some(m => m.id === tempId)) {
-                  return prev.map(m => m.id === tempId ? { id: info.id, role: info.role, content: '' } : m);
-                }
-              }
-              return [...prev, { id: info.id, role: info.role, content: '' }];
-            });
-            if (info.role === 'assistant') cb.onStreamingMsgId(info.id);
-            continue;
-          }
 
-           // ── session.status ──────────────────────────────────────────────
-           // Fires during delegation transitions (busy↔idle↔retry).
-           // Keeps busySessions in sync so the session can't get stuck-busy
-           // if session.idle never arrives.
-           if (type === 'session.status') {
-             const props = p as { sessionID: string; status: { type: string } };
-             const { sessionID: statusSid, status: sessionStatus } = props;
-             if (statusSid && statusSid === sid) {
-               if (sessionStatus?.type === 'busy') {
-                 cb.onBusySessions(prev => new Set(prev).add(sid));
-               } else {
-                 cb.onBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
+               // ── session.status ──────────────────────────────────────────────
+               // Fires during delegation transitions (busy↔idle↔retry).
+               // Keeps busySessions in sync so the session can't get stuck-busy
+               // if session.idle never arrives.
+               if (type === 'session.status') {
+                 const props = p as { sessionID: string; status: { type: string } };
+                 const { sessionID: statusSid, status: sessionStatus } = props;
+                 if (statusSid && statusSid === sid) {
+                   if (sessionStatus?.type === 'busy') {
+                     cb.onBusySessions(prev => new Set(prev).add(sid));
+                   } else {
+                     cb.onBusySessions(prev => { const next = new Set(prev); next.delete(sid); return next; });
+                     // Clear loading state when session transitions to idle via status
+                     // (session.idle event is preferred, but not all servers fire it reliably)
+                     cb.onLoading(false);
+                     cb.onError(null);
+                   }
+                 }
+                 continue;
                }
-             }
-             continue;
-           }
 
-           // ── session.idle ───────────────────────────────────────────────
-           if (type === 'session.idle') {
-            cleanupSession(sid);
-            abort.abort();
-            abortRef.current = null;
-            break;
-          }
+               // ── session.idle ───────────────────────────────────────────────
+               if (type === 'session.idle') {
+                cleanupSession(sid);
+                abort.abort();
+                abortRef.current = null;
+                break;
+              }
 
-          // ── session.error ──────────────────────────────────────────────
-          if (type === 'session.error') {
-            const err = p.error as any;
-            cleanupSession(sid, err?.data?.message ?? err?.message ?? 'Unknown error');
-            abort.abort();
-            abortRef.current = null;
-            break;
-          }
+              // ── session.error ──────────────────────────────────────────────
+              if (type === 'session.error') {
+                const err = p.error as any;
+                cleanupSession(sid, err?.data?.message ?? err?.message ?? 'Unknown error');
+                abort.abort();
+                abortRef.current = null;
+                break;
+              }
 
-           // ── permission.asked (v2 name) ─────────────────────────────────
-           if (type === 'permission.asked') {
-             const permission = p as PermissionRequest;
-             if (!permission?.id || !permission.sessionID) continue;
+               // ── permission.asked (v2 name) ─────────────────────────────────
+               if (type === 'permission.asked') {
+                 const permission = p as PermissionRequest;
+                 if (!permission?.id || !permission.sessionID) continue;
 
-             console.log('permission.asked', { permissionId: permission.id, sessionID: permission.sessionID, autopilotDisabled: true });
-             cb.onPermissionsUpdate(prev => {
-               const existing = prev[permission.sessionID] ?? [];
-               const idx = existing.findIndex(pp => pp.id === permission.id);
-               const next = [...existing];
-               if (idx >= 0) next[idx] = permission;
-               else next.push(permission);
-               return { ...prev, [permission.sessionID]: next };
-             });
-             continue;
-          }
+                 console.log('permission.asked', { permissionId: permission.id, sessionID: permission.sessionID, autopilotDisabled: true });
+                 cb.onPermissionsUpdate(prev => {
+                   const existing = prev[permission.sessionID] ?? [];
+                   const idx = existing.findIndex(pp => pp.id === permission.id);
+                   const next = [...existing];
+                   if (idx >= 0) next[idx] = permission;
+                   else next.push(permission);
+                   return { ...prev, [permission.sessionID]: next };
+                 });
+                 continue;
+              }
 
-          // ── permission.replied ─────────────────────────────────────────
-          if (type === 'permission.replied') {
-            const props = p as { sessionID?: string; requestID?: string };
-            if (props.sessionID && props.requestID) {
-              cb.onPermissionsUpdate(prev => {
-                const existing = prev[props.sessionID!] ?? [];
-                const filtered = existing.filter(pp => pp.id !== props.requestID);
-                if (filtered.length === 0) {
-                  const next = { ...prev };
-                  delete next[props.sessionID!];
-                  return next;
+              // ── permission.replied ─────────────────────────────────────────
+              if (type === 'permission.replied') {
+                const props = p as { sessionID?: string; requestID?: string };
+                if (props.sessionID && props.requestID) {
+                  cb.onPermissionsUpdate(prev => {
+                    const existing = prev[props.sessionID!] ?? [];
+                    const filtered = existing.filter(pp => pp.id !== props.requestID);
+                    if (filtered.length === 0) {
+                      const next = { ...prev };
+                      delete next[props.sessionID!];
+                      return next;
+                    }
+                    return { ...prev, [props.sessionID!]: filtered };
+                  });
                 }
-                return { ...prev, [props.sessionID!]: filtered };
-              });
-            }
-            continue;
-          }
+                continue;
+              }
 
-          // ── question.asked (v2 native) ─────────────────────────────────
-          if (type === 'question.asked') {
-            const question = p as QuestionRequest;
-            if (question?.id && question.sessionID) {
-              cb.onQuestionsUpdate(prev => {
-                const existing = prev[question.sessionID] ?? [];
-                const idx = existing.findIndex(q => q.id === question.id);
-                const next = [...existing];
-                if (idx >= 0) next[idx] = question;
-                else next.push(question);
-                return { ...prev, [question.sessionID]: next };
-              });
-            }
-            continue;
-          }
-
-          // ── question.replied / question.rejected ───────────────────────
-          if (type === 'question.replied' || type === 'question.rejected') {
-            const props = p as { sessionID?: string; requestID?: string };
-            if (props.sessionID && props.requestID) {
-              cb.onQuestionsUpdate(prev => {
-                const existing = prev[props.sessionID!] ?? [];
-                const filtered = existing.filter(q => q.id !== props.requestID);
-                if (filtered.length === 0) {
-                  const next = { ...prev };
-                  delete next[props.sessionID!];
-                  return next;
+              // ── question.asked (v2 native) ─────────────────────────────────
+              if (type === 'question.asked') {
+                const question = p as QuestionRequest;
+                if (question?.id && question.sessionID) {
+                  cb.onQuestionsUpdate(prev => {
+                    const existing = prev[question.sessionID] ?? [];
+                    const idx = existing.findIndex(q => q.id === question.id);
+                    const next = [...existing];
+                    if (idx >= 0) next[idx] = question;
+                    else next.push(question);
+                    return { ...prev, [question.sessionID]: next };
+                  });
                 }
-                return { ...prev, [props.sessionID!]: filtered };
-              });
+                continue;
+              }
+
+              // ── question.replied / question.rejected ───────────────────────
+              if (type === 'question.replied' || type === 'question.rejected') {
+                const props = p as { sessionID?: string; requestID?: string };
+                if (props.sessionID && props.requestID) {
+                  cb.onQuestionsUpdate(prev => {
+                    const existing = prev[props.sessionID!] ?? [];
+                    const filtered = existing.filter(q => q.id !== props.requestID);
+                    if (filtered.length === 0) {
+                      const next = { ...prev };
+                      delete next[props.sessionID!];
+                      return next;
+                    }
+                    return { ...prev, [props.sessionID!]: filtered };
+                  });
+                }
+                continue;
+              }
+            } catch (eventErr) {
+              // Malformed event — log and skip instead of breaking the stream
+              console.warn('[useSessionEvents] skipping malformed event:', eventErr);
             }
-            continue;
-          }
-        } // end for-await
+          } // end for-await
 
         // Clear reconnect stability timer if still pending
         if (reconnectStabilityTimer) {
