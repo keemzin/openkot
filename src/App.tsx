@@ -102,7 +102,7 @@ function App() {
       return next;
     });
   };
-  const [selectedAgent, setSelectedAgent] = useState<'build' | 'plan'>('build');
+  const [selectedAgent, setSelectedAgent] = useState<string>('build');
   const [agentOpen, setAgentOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
   // Per-session auto-accept (autopilot) state - matches OpenChamber pattern

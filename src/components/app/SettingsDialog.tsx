@@ -3,6 +3,8 @@ import type { ModelInfo } from '../../types';
 import { McpForm } from './McpForm';
 import { usePreferencesStore } from '../../stores/preferencesStore';
 import { getClient } from '../../lib/opencode';
+import { AgentsSidebar } from '../sections/agents/AgentsSidebar';
+import { AgentsPage } from '../sections/agents/AgentsPage';
 
 interface McpServer {
   name: string;
@@ -89,7 +91,7 @@ const CommandEditor = ({ command, onSave, onCancel }: { command: Command; onSave
 };
 
 export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, onToggleModelVisibility }: SettingsDialogProps) {
-  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'providers' | 'commands' | 'appearance'>('mcp');
+  const [selectedPage, setSelectedPage] = useState<'mcp' | 'models' | 'providers' | 'commands' | 'appearance' | 'agents'>('mcp');
   const [configScope, setConfigScope] = useState<'global' | 'local'>('global');
   const { streamingMode, setStreamingMode } = usePreferencesStore();
   const [mcpServers, setMcpServers] = useState<McpServer[]>([]);
@@ -602,6 +604,18 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
               borderLeft: !isMobile && selectedPage === 'commands' ? '2px solid var(--accent)' : 'none',
               borderBottom: isMobile && selectedPage === 'commands' ? '2px solid var(--accent)' : 'none'
             }}>Commands</button>
+            <button onClick={() => setSelectedPage('agents')} style={{
+              width: isMobile ? 'auto' : '100%',
+              padding: isMobile ? '8px 12px' : '8px 16px',
+              background: selectedPage === 'agents' ? 'var(--bg-2)' : 'transparent',
+              border: 'none',
+              color: 'var(--text)',
+              fontSize: 14,
+              cursor: 'pointer',
+              textAlign: 'left',
+              borderLeft: !isMobile && selectedPage === 'agents' ? '2px solid var(--accent)' : 'none',
+              borderBottom: isMobile && selectedPage === 'agents' ? '2px solid var(--accent)' : 'none'
+            }}>Agents</button>
             <button onClick={() => setSelectedPage('appearance')} style={{
               width: isMobile ? 'auto' : '100%',
               padding: isMobile ? '8px 12px' : '8px 16px',
@@ -615,7 +629,7 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
               borderBottom: isMobile && selectedPage === 'appearance' ? '2px solid var(--accent)' : 'none'
             }}>Appearance</button>
           </div>
-          <div style={{ flex: 1, padding: isMobile ? '16px' : '20px', overflowY: 'auto' }}>
+          <div style={{ flex: 1, padding: isMobile ? '16px' : selectedPage === 'agents' ? '0' : '20px', overflowY: selectedPage === 'agents' ? 'hidden' : 'auto' }}>
             {selectedPage === 'mcp' && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
@@ -675,7 +689,7 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
 
                               {/* Info row */}
                               <div style={{ fontSize: 11, color: 'var(--text-3)', marginBottom: 8, fontFamily: 'monospace' }}>
-                                {server.type === 'remote' ? server.url : server.command?.join(' ') || 'N/A'}
+                                {server.type === 'remote' ? server.url : Array.isArray(server.command) ? server.command.join(' ') : server.command || 'N/A'}
                               </div>
 
                               {/* Error message */}
@@ -1448,6 +1462,22 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
               <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 300 }}>{restartError}</span>
             )}
 
+            {selectedPage === 'agents' && (
+              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: '100%', gap: 0 }}>
+                <div style={{
+                  width: isMobile ? 'auto' : 220,
+                  borderRight: isMobile ? 'none' : '1px solid var(--border)',
+                  borderBottom: isMobile ? '1px solid var(--border)' : 'none',
+                  flexShrink: 0, overflow: 'hidden',
+                  maxHeight: isMobile ? 120 : 'none',
+                }}>
+                  <AgentsSidebar />
+                </div>
+                <div style={{ flex: 1, overflow: 'hidden' }}>
+                  <AgentsPage />
+                </div>
+              </div>
+            )}
             {selectedPage === 'appearance' && (
               <div>
                 <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 16 }}>Appearance</h3>

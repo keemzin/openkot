@@ -15,6 +15,7 @@ import registerFsRoutes from './routes/fs.js';
 import registerGitRoutes from './routes/git.js';
 import registerMcpRoutes from './routes/mcp.js';
 import registerConfigRoutes from './routes/config.js';
+import registerAgentRoutes from './routes/agents.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -27,6 +28,7 @@ async function start() {
   registerGitRoutes(app);
   registerMcpRoutes(app);
   registerConfigRoutes(app);
+  registerAgentRoutes(app);
   const terminalWss = registerTerminalRoutes(app);
 
   // Proxy remaining /api calls to OpenCode backend
