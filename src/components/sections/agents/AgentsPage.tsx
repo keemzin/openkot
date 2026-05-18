@@ -366,7 +366,7 @@ export function AgentsPage() {
   const summaryPermissions = STANDARD_PERMISSION_KEYS.filter(k => k !== '*');
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto', padding: isMobile ? '12px' : '20px 24px' }}>
+    <div style={{ padding: isMobile ? '12px' : '20px 24px' }}>
       <div style={{ maxWidth: 640, margin: '0 auto' }}>
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>

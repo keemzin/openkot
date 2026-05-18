@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useCallback, useState } from 'react';
 import { useAgentsStore, filterVisibleAgents, isAgentBuiltIn } from '../../stores/useAgentsStore';
 
 interface AgentSelectorProps {
@@ -10,10 +10,43 @@ interface AgentSelectorProps {
 
 export function AgentSelector({ selectedAgent, setSelectedAgent, agentOpen, setAgentOpen }: AgentSelectorProps) {
   const { agents, loadAgents } = useAgentsStore();
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({ display: 'none' });
 
   useEffect(() => {
     if (agents.length === 0) loadAgents();
   }, [loadAgents]);
+
+  const updateDropdownPosition = useCallback(() => {
+    if (!btnRef.current || !agentOpen) return;
+    const rect = btnRef.current.getBoundingClientRect();
+    const availAbove = rect.top - 12;
+    const maxW = Math.min(360, window.innerWidth - 32);
+    const style: React.CSSProperties = {
+      position: 'fixed',
+      bottom: window.innerHeight - rect.top + rect.height + 4,
+      right: window.innerWidth - rect.right,
+      background: 'var(--bg-3)',
+      border: '1px solid var(--border-2)',
+      borderRadius: 8,
+      minWidth: 240,
+      width: 'max-content',
+      maxWidth: maxW,
+      maxHeight: Math.min(320, availAbove),
+      overflowY: 'auto',
+      boxShadow: '0 -4px 20px rgba(0,0,0,0.25)',
+      zIndex: 1000,
+    };
+    setDropdownStyle(style);
+  }, [agentOpen]);
+
+  useEffect(() => {
+    if (agentOpen) {
+      updateDropdownPosition();
+      window.addEventListener('resize', updateDropdownPosition);
+      return () => window.removeEventListener('resize', updateDropdownPosition);
+    }
+  }, [agentOpen, updateDropdownPosition]);
 
   const displayAgents = useMemo(() => filterVisibleAgents(agents), [agents]);
 
@@ -25,6 +58,7 @@ export function AgentSelector({ selectedAgent, setSelectedAgent, agentOpen, setA
   return (
     <div style={{ position: 'relative' }} onMouseDown={e => e.stopPropagation()}>
       <button
+        ref={btnRef}
         onClick={() => setAgentOpen(o => !o)}
         style={{
           display: 'flex', alignItems: 'center', gap: 5,
@@ -47,13 +81,8 @@ export function AgentSelector({ selectedAgent, setSelectedAgent, agentOpen, setA
       </button>
       {agentOpen && (
         <>
-          <div onClick={() => setAgentOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 98 }} />
-          <div style={{
-            position: 'absolute', bottom: '100%', right: 0, marginBottom: 4,
-            background: 'var(--bg-3)', border: '1px solid var(--border-2)',
-            borderRadius: 8, minWidth: 220, maxHeight: 300, overflowY: 'auto',
-            boxShadow: '0 -4px 20px rgba(0,0,0,0.15)', zIndex: 99,
-          }}>
+          <div onClick={() => setAgentOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 999 }} />
+          <div style={dropdownStyle}>
             {displayAgents.length === 0 ? (
               <div style={{ padding: 12, textAlign: 'center', color: 'var(--text-4)', fontSize: 12 }}>
                 No agents available

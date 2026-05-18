@@ -629,8 +629,23 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
               borderBottom: isMobile && selectedPage === 'appearance' ? '2px solid var(--accent)' : 'none'
             }}>Appearance</button>
           </div>
-          <div style={{ flex: 1, padding: isMobile ? '16px' : selectedPage === 'agents' ? '0' : '20px', overflowY: selectedPage === 'agents' ? 'hidden' : 'auto' }}>
-            {selectedPage === 'mcp' && (
+          <div style={{ flex: 1, padding: '16px', overflowY: 'auto' }}>
+            {selectedPage === 'agents' ? (
+              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: '100%', gap: 0 }}>
+                <div style={{
+                  width: isMobile ? '100%' : 220,
+                  borderRight: isMobile ? 'none' : '1px solid var(--border)',
+                  borderBottom: isMobile ? '1px solid var(--border)' : 'none',
+                  flexShrink: 0, overflow: 'auto',
+                  maxHeight: isMobile ? 200 : undefined,
+                }}>
+                  <AgentsSidebar onItemSelect={() => {}} />
+                </div>
+                <div style={{ flex: 1, overflow: 'auto' }}>
+                  <AgentsPage />
+                </div>
+              </div>
+            ) : selectedPage === 'mcp' && (
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
                   <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)' }}>MCP Servers</h3>
@@ -1405,79 +1420,8 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
                </div>
              </div>
            </div>
-         )}
-
-         <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <button
-              disabled={restartStatus === 'restarting'}
-              onClick={async () => {
-                if (!confirm('Restart OpenCode server? This will disconnect all sessions.')) return;
-                setRestartStatus('restarting');
-                setRestartError(null);
-
-                // Fire the restart — server responds immediately
-                try {
-                  await fetch('/restart', { method: 'POST' });
-                } catch {
-                  // network error before response — server may still be restarting
-                }
-
-                // Poll /health until isOpenCodeReady or timeout (30s)
-                const deadline = Date.now() + 30000;
-                let ready = false;
-                let lastError: string | null = null;
-
-                while (Date.now() < deadline) {
-                  await new Promise(r => setTimeout(r, 1000));
-                  try {
-                    const res = await fetch('/health');
-                    if (res.ok) {
-                      const data = await res.json();
-                      if (data.isOpenCodeReady) { ready = true; break; }
-                      if (data.lastError) lastError = data.lastError;
-                    }
-                  } catch {}
-                }
-
-                if (ready) {
-                  setRestartStatus('done');
-                  setTimeout(() => window.location.reload(), 500);
-                } else {
-                  setRestartStatus('error');
-                  setRestartError(lastError ?? 'OpenCode did not become ready in time. Check server logs.');
-                }
-              }}
-              style={{
-                padding: '6px 12px',
-                background: restartStatus === 'restarting' ? 'var(--text-3)' : 'var(--red)',
-                border: 'none', borderRadius: 4, color: 'white',
-                cursor: restartStatus === 'restarting' ? 'not-allowed' : 'pointer',
-                opacity: restartStatus === 'restarting' ? 0.7 : 1,
-              }}
-            >
-              {restartStatus === 'restarting' ? 'Restarting…' : restartStatus === 'done' ? 'Reloading…' : 'Restart OpenCode'}
-            </button>
-            {restartStatus === 'error' && restartError && (
-              <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 300 }}>{restartError}</span>
             )}
 
-            {selectedPage === 'agents' && (
-              <div style={{ display: 'flex', flexDirection: isMobile ? 'column' : 'row', height: '100%', gap: 0 }}>
-                <div style={{
-                  width: isMobile ? 'auto' : 220,
-                  borderRight: isMobile ? 'none' : '1px solid var(--border)',
-                  borderBottom: isMobile ? '1px solid var(--border)' : 'none',
-                  flexShrink: 0, overflow: 'hidden',
-                  maxHeight: isMobile ? 120 : 'none',
-                }}>
-                  <AgentsSidebar />
-                </div>
-                <div style={{ flex: 1, overflow: 'hidden' }}>
-                  <AgentsPage />
-                </div>
-              </div>
-            )}
             {selectedPage === 'appearance' && (
               <div>
                 <h3 style={{ fontSize: 16, fontWeight: 600, color: 'var(--text)', marginBottom: 16 }}>Appearance</h3>
@@ -1522,12 +1466,67 @@ export function SettingsDialog({ onClose, models, workingDir, hiddenModelIds, on
               </div>
             )}
           </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={onClose} style={{ padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer' }}>Cancel</button>
-            <button onClick={saveSettings} style={{ padding: '6px 12px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer' }}>Save</button>
-          </div>
+
+          <div style={{ padding: '16px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+             <button
+               disabled={restartStatus === 'restarting'}
+               onClick={async () => {
+                 if (!confirm('Restart OpenCode server? This will disconnect all sessions.')) return;
+                 setRestartStatus('restarting');
+                 setRestartError(null);
+
+                 // Fire the restart — server responds immediately
+                 try {
+                   await fetch('/restart', { method: 'POST' });
+                 } catch {
+                   // network error before response — server may still be restarting
+                 }
+
+                 // Poll /health until isOpenCodeReady or timeout (30s)
+                 const deadline = Date.now() + 30000;
+                 let ready = false;
+                 let lastError: string | null = null;
+
+                 while (Date.now() < deadline) {
+                   await new Promise(r => setTimeout(r, 1000));
+                   try {
+                     const res = await fetch('/health');
+                     if (res.ok) {
+                       const data = await res.json();
+                       if (data.isOpenCodeReady) { ready = true; break; }
+                       if (data.lastError) lastError = data.lastError;
+                     }
+                   } catch {}
+                 }
+
+                 if (ready) {
+                   setRestartStatus('done');
+                   setTimeout(() => window.location.reload(), 500);
+                 } else {
+                   setRestartStatus('error');
+                   setRestartError(lastError ?? 'OpenCode did not become ready in time. Check server logs.');
+                 }
+               }}
+               style={{
+                 padding: '6px 12px',
+                 background: restartStatus === 'restarting' ? 'var(--text-3)' : 'var(--red)',
+                 border: 'none', borderRadius: 4, color: 'white',
+                 cursor: restartStatus === 'restarting' ? 'not-allowed' : 'pointer',
+                 opacity: restartStatus === 'restarting' ? 0.7 : 1,
+               }}
+             >
+               {restartStatus === 'restarting' ? 'Restarting…' : restartStatus === 'done' ? 'Reloading…' : 'Restart OpenCode'}
+             </button>
+             {restartStatus === 'error' && restartError && (
+               <span style={{ fontSize: 11, color: 'var(--red)', maxWidth: 300 }}>{restartError}</span>
+             )}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button onClick={onClose} style={{ padding: '6px 12px', background: 'transparent', border: '1px solid var(--border)', borderRadius: 4, color: 'var(--text-3)', cursor: 'pointer' }}>Cancel</button>
+              <button onClick={saveSettings} style={{ padding: '6px 12px', background: 'var(--accent)', border: 'none', borderRadius: 4, color: 'white', cursor: 'pointer' }}>Save</button>
+            </div>
         </div>
-      </div>
     </>
-  );
+   );
 }
