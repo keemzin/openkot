@@ -34,11 +34,12 @@ export interface AgentWithExtras {
   options?: { hidden?: boolean };
   hidden?: boolean;
   builtIn?: boolean;
+  native?: boolean;
   color?: string;
 }
 
 export const isAgentBuiltIn = (agent: AgentWithExtras): boolean => {
-  return agent.builtIn === true;
+  return agent.builtIn === true || agent.native === true;
 };
 
 export const isAgentHidden = (agent: AgentWithExtras): boolean => {
@@ -61,7 +62,11 @@ interface AgentsStore {
   createAgent: (config: AgentConfig) => Promise<boolean>;
   updateAgent: (name: string, config: Partial<AgentConfig>) => Promise<boolean>;
   deleteAgent: (name: string) => Promise<boolean>;
+  getAgentByName: (name: string) => AgentWithExtras | undefined;
 }
+
+function directoryParams(): string { return ''; }
+function directoryHeaders(): Record<string, string> { return {}; }
 
 export const useAgentsStore = create<AgentsStore>()((set, get) => ({
   agents: [],
@@ -87,27 +92,26 @@ export const useAgentsStore = create<AgentsStore>()((set, get) => ({
         const data = await resp.json();
         const agentsList: AgentWithExtras[] = data?.data ?? (Array.isArray(data) ? data : []);
 
-        const metaResp = await fetch('/api/config/agents/meta');
-        const meta = metaResp.ok ? await metaResp.json() : {};
+        const agentsWithScope = await Promise.all(
+          agentsList.map(async (agent) => {
+            try {
+              const metaResp = await fetch(`/api/config/agents/${encodeURIComponent(agent.name)}${directoryParams()}`, {
+                headers: { 'Cache-Control': 'no-cache', ...directoryHeaders() },
+              });
+              if (metaResp.ok) {
+                const meta = await metaResp.json();
+                const sources = meta.sources;
+                const scope = meta.scope
+                  ?? (sources?.md?.exists ? sources.md.scope : undefined)
+                  ?? (sources?.json?.exists ? sources.json.scope : undefined);
+                return { ...agent, scope, builtIn: meta.isBuiltIn ?? (!sources?.md?.exists && !sources?.json?.exists) };
+              }
+            } catch { /* ignore */ }
+            return agent;
+          })
+        );
 
-        const builtInNames = new Set(agentsList.map(a => a.name));
-
-        const agentsWithExtras = agentsList.map((agent) => ({
-          ...agent,
-          builtIn: !meta[agent.name],
-          scope: meta[agent.name]?.scope || 'user',
-        }));
-
-        const metaOnlyNames = Object.keys(meta).filter(n => !builtInNames.has(n));
-        for (const name of metaOnlyNames) {
-          agentsWithExtras.push({
-            name,
-            builtIn: false,
-            scope: meta[name]?.scope || 'user',
-          });
-        }
-
-        set({ agents: agentsWithExtras, isLoading: false });
+        set({ agents: agentsWithScope, isLoading: false });
         return true;
       } catch (error) {
         if (remaining > 0) {
@@ -126,27 +130,24 @@ export const useAgentsStore = create<AgentsStore>()((set, get) => ({
   createAgent: async (config) => {
     set({ isSaving: true });
     try {
-      const resp = await fetch(`/api/config/agents/${encodeURIComponent(config.name)}`, {
+      const body: Record<string, unknown> = { mode: config.mode || 'subagent' };
+      if (config.description) body.description = config.description;
+      if (config.model) body.model = config.model;
+      if (config.temperature !== undefined) body.temperature = config.temperature;
+      if (config.top_p !== undefined) body.top_p = config.top_p;
+      if (config.prompt) body.prompt = config.prompt;
+      if (config.permission) body.permission = config.permission;
+      if (config.disable !== undefined) body.disable = config.disable;
+      if (config.scope) body.scope = config.scope;
+
+      const resp = await fetch(`/api/config/agents/${encodeURIComponent(config.name)}${directoryParams()}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: config.name,
-          description: config.description,
-          model: config.model && config.model !== 'null' ? config.model : undefined,
-          temperature: config.temperature,
-          topP: config.top_p,
-          prompt: config.prompt,
-          mode: config.mode,
-          permission: config.permission,
-          scope: config.scope || 'user',
-          color: config.color,
-          hidden: config.hidden,
-        }),
+        headers: { 'Content-Type': 'application/json', ...directoryHeaders() },
+        body: JSON.stringify(body),
       });
       if (!resp.ok) {
-        const errText = await resp.text();
-        console.error('Create agent failed:', errText);
-        return false;
+        const payload = await resp.json().catch(() => null);
+        throw new Error(payload?.error || 'Failed to create agent');
       }
 
       await new Promise(r => setTimeout(r, 2000));
@@ -164,26 +165,23 @@ export const useAgentsStore = create<AgentsStore>()((set, get) => ({
     set({ isSaving: true });
     try {
       const body: Record<string, unknown> = {};
+      if (config.mode !== undefined) body.mode = config.mode;
       if (config.description !== undefined) body.description = config.description;
       if (config.model !== undefined) body.model = config.model === null ? null : config.model;
       if (config.temperature !== undefined) body.temperature = config.temperature;
-      if (config.top_p !== undefined) body.topP = config.top_p;
+      if (config.top_p !== undefined) body.top_p = config.top_p;
       if (config.prompt !== undefined) body.prompt = config.prompt;
-      if (config.mode !== undefined) body.mode = config.mode;
       if (config.permission !== undefined) body.permission = config.permission;
-      if (config.scope !== undefined) body.scope = config.scope;
-      if (config.color !== undefined) body.color = config.color;
-      if (config.hidden !== undefined) body.hidden = config.hidden;
+      if (config.disable !== undefined) body.disable = config.disable;
 
-      const resp = await fetch(`/api/config/agents/${encodeURIComponent(name)}`, {
+      const resp = await fetch(`/api/config/agents/${encodeURIComponent(name)}${directoryParams()}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...directoryHeaders() },
         body: JSON.stringify(body),
       });
       if (!resp.ok) {
-        const errText = await resp.text();
-        console.error('Update agent failed:', errText);
-        return false;
+        const payload = await resp.json().catch(() => null);
+        throw new Error(payload?.error || 'Failed to update agent');
       }
 
       await new Promise(r => setTimeout(r, 2000));
@@ -199,19 +197,17 @@ export const useAgentsStore = create<AgentsStore>()((set, get) => ({
 
   deleteAgent: async (name) => {
     try {
-      const resp = await fetch(`/api/config/agents/${encodeURIComponent(name)}`, {
+      const resp = await fetch(`/api/config/agents/${encodeURIComponent(name)}${directoryParams()}`, {
         method: 'DELETE',
+        headers: directoryHeaders(),
       });
       if (!resp.ok) {
-        const errText = await resp.text();
-        console.error('Delete agent failed:', errText);
-        return false;
+        const payload = await resp.json().catch(() => null);
+        throw new Error(payload?.error || 'Failed to delete agent');
       }
 
       const state = get();
-      if (state.selectedAgentName === name) {
-        set({ selectedAgentName: null });
-      }
+      if (state.selectedAgentName === name) set({ selectedAgentName: null });
 
       await new Promise(r => setTimeout(r, 2000));
       await get().loadAgents();
@@ -220,5 +216,9 @@ export const useAgentsStore = create<AgentsStore>()((set, get) => ({
       console.error('Failed to delete agent:', error);
       return false;
     }
+  },
+
+  getAgentByName: (name) => {
+    return get().agents.find(a => a.name === name);
   },
 }));

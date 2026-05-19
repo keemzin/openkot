@@ -30,7 +30,6 @@
     "@codemirror/view": "^6.41.1",
     "@lezer/common": "^1.5.2",
     "@opencode-ai/sdk": "^1.14.33",
-    "opencode-ai": "^1.14.41",
     "@types/marked": "^6.0.0",
     "@types/prismjs": "^1.26.6",
     "@xterm/addon-fit": "^0.11.0",
@@ -41,11 +40,14 @@
     "express-ws": "^5.0.2",
     "ghostty-web": "^0.4.0",
     "http-proxy-middleware": "^3.0.5",
+    "jsonc-parser": "^3.3.1",
     "marked": "^18.0.0",
+    "opencode-ai": "^1.14.41",
     "prismjs": "^1.30.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "ws": "^8.18.0",
+    "yaml": "^2.9.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
