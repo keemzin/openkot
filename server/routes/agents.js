@@ -10,12 +10,10 @@ const OPENCODE_CONFIG_DIR = path.join(os.homedir(), '.config', 'opencode');
 const AGENT_DIR = path.join(OPENCODE_CONFIG_DIR, 'agents');
 const AGENT_SCOPE = { USER: 'user', PROJECT: 'project' };
 
-// ============== DIRS ==============
 function ensureDirs() {
   if (!fs.existsSync(AGENT_DIR)) fs.mkdirSync(AGENT_DIR, { recursive: true });
 }
 
-// ============== CONFIG LAYERS ==============
 function getProjectConfigPath(workingDir) {
   if (!workingDir) return null;
   const candidates = [
@@ -33,16 +31,15 @@ function getProjectConfigPath(workingDir) {
 function readConfigFile(filePath) {
   if (!filePath || !fs.existsSync(filePath)) return {};
   try {
-    const content = fs.readFileSync(filePath, 'utf8');
-    return parseJsonc(content.trim() || '{}', [], { allowTrailingComma: true });
+    return parseJsonc(fs.readFileSync(filePath, 'utf8').trim() || '{}', [], { allowTrailingComma: true });
   } catch {
     return {};
   }
 }
 
-function writeConfig(config, filePath) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(config, null, 2), 'utf8');
+async function writeConfigAsync(config, filePath) {
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.promises.writeFile(filePath, JSON.stringify(config, null, 2), 'utf8');
 }
 
 function readConfigLayers(workingDir) {
@@ -53,31 +50,23 @@ function readConfigLayers(workingDir) {
   ];
   const userPath = userPaths.find(p => fs.existsSync(p)) || userPaths[0];
   const projectPath = getProjectConfigPath(workingDir);
-  const userConfig = readConfigFile(userPath);
-  const projectConfig = readConfigFile(projectPath);
-  return { userConfig, projectConfig, paths: { userPath, projectPath } };
+  return { userConfig: readConfigFile(userPath), projectConfig: readConfigFile(projectPath), paths: { userPath, projectPath } };
 }
 
 function getJsonEntrySource(layers, agentName) {
   const { projectConfig, userConfig, paths } = layers;
   const projectSection = projectConfig?.agent?.[agentName];
-  if (projectSection !== undefined) {
-    return { section: projectSection, config: projectConfig, path: paths.projectPath, exists: true };
-  }
+  if (projectSection !== undefined) return { section: projectSection, config: projectConfig, path: paths.projectPath, exists: true };
   const userSection = userConfig?.agent?.[agentName];
-  if (userSection !== undefined) {
-    return { section: userSection, config: userConfig, path: paths.userPath, exists: true };
-  }
+  if (userSection !== undefined) return { section: userSection, config: userConfig, path: paths.userPath, exists: true };
   return { section: null, config: null, path: null, exists: false };
 }
 
 function getJsonWriteTarget(layers) {
-  const { projectConfig, userConfig, paths } = layers;
-  if (paths.projectPath) return { config: projectConfig, path: paths.projectPath };
-  return { config: userConfig, path: paths.userPath };
+  if (layers.paths.projectPath) return { config: layers.projectConfig, path: layers.paths.projectPath };
+  return { config: layers.userConfig, path: layers.paths.userPath };
 }
 
-// ============== MD FILE OPS ==============
 function parseMdFile(filePath) {
   const content = fs.readFileSync(filePath, 'utf8');
   const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
@@ -87,15 +76,14 @@ function parseMdFile(filePath) {
   return { frontmatter, body: (match[2] || '').trim() };
 }
 
-function writeMdFile(filePath, frontmatter, body) {
+async function writeMdFileAsync(filePath, frontmatter, body) {
   const cleaned = Object.fromEntries(Object.entries(frontmatter).filter(([, v]) => v != null));
   const yamlStr = yaml.stringify(cleaned);
   const content = `---\n${yamlStr}---\n\n${body || ''}`;
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, content, 'utf8');
+  await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.promises.writeFile(filePath, content, 'utf8');
 }
 
-// ============== AGENT PATH HELPERS ==============
 function getProjectAgentPath(workingDir, name) {
   return path.join(workingDir, '.opencode', 'agents', `${name}.md`);
 }
@@ -129,10 +117,8 @@ function getAgentSources(name, workingDir) {
   const projectExists = projectPath && fs.existsSync(projectPath);
   const userPath = getUserAgentPath(name);
   const userExists = fs.existsSync(userPath);
-
   const mdPath = projectExists ? projectPath : (userExists ? userPath : null);
   const mdScope = projectExists ? AGENT_SCOPE.PROJECT : (userExists ? AGENT_SCOPE.USER : null);
-
   const layers = readConfigLayers(workingDir);
   const jsonSource = getJsonEntrySource(layers, name);
 
@@ -140,7 +126,6 @@ function getAgentSources(name, workingDir) {
     md: { exists: !!mdPath, path: mdPath, scope: mdScope, fields: [] },
     json: { exists: jsonSource.exists, path: jsonSource.path, scope: jsonSource.exists ? (jsonSource.path === layers.paths.projectPath ? AGENT_SCOPE.PROJECT : AGENT_SCOPE.USER) : null, fields: [] },
   };
-
   if (mdPath) {
     const { frontmatter, body } = parseMdFile(mdPath);
     sources.md.fields = Object.keys(frontmatter);
@@ -149,7 +134,6 @@ function getAgentSources(name, workingDir) {
   if (jsonSource.section) {
     sources.json.fields = Object.keys(jsonSource.section);
   }
-
   return sources;
 }
 
@@ -168,48 +152,38 @@ function getAgentConfig(name, workingDir) {
   return { source: 'none', scope: null, config: {} };
 }
 
-// ============== CRUD ==============
-function createAgent(name, config, workingDir, scope) {
+async function createAgent(name, config, workingDir, scope) {
   ensureDirs();
   const projectPath = workingDir ? getProjectAgentPath(workingDir, name) : null;
   const userPath = getUserAgentPath(name);
   if (projectPath && fs.existsSync(projectPath)) throw new Error(`Agent ${name} already exists as project-level .md`);
   if (fs.existsSync(userPath)) throw new Error(`Agent ${name} already exists as user-level .md`);
-
   const layers = readConfigLayers(workingDir);
-  const jsonSource = getJsonEntrySource(layers, name);
-  if (jsonSource.exists) throw new Error(`Agent ${name} already exists in opencode.json`);
+  if (getJsonEntrySource(layers, name).exists) throw new Error(`Agent ${name} already exists in opencode.json`);
 
   const targetPath = scope === AGENT_SCOPE.PROJECT && workingDir ? projectPath : userPath;
   const { prompt, ...frontmatter } = config;
-  writeMdFile(targetPath, frontmatter, prompt || '');
+  await writeMdFileAsync(targetPath, frontmatter, prompt || '');
 }
 
-function updateAgent(name, updates, workingDir) {
+async function updateAgent(name, updates, workingDir) {
   ensureDirs();
 
   const { scope, path: mdPath } = getAgentWritePath(name, workingDir, null);
   const mdExists = mdPath && fs.existsSync(mdPath);
-
   const layers = readConfigLayers(workingDir);
   const jsonSource = getJsonEntrySource(layers, name);
   const hasJsonFields = jsonSource.exists && jsonSource.section && Object.keys(jsonSource.section).length > 0;
   const jsonTarget = jsonSource.exists
     ? { config: jsonSource.config, path: jsonSource.path }
     : getJsonWriteTarget(layers);
-  let jsonConfig = jsonTarget.config || {};
-
+  const jsonConfig = jsonTarget.config || {};
   const isBuiltinOverride = !mdExists && !hasJsonFields;
 
   let targetPath = mdPath;
-  let targetScope = scope;
+  if (!mdExists && isBuiltinOverride) targetPath = getUserAgentPath(name);
 
-  if (!mdExists && isBuiltinOverride) {
-    targetPath = getUserAgentPath(name);
-    targetScope = AGENT_SCOPE.USER;
-  }
-
-  let mdData = mdExists ? parseMdFile(mdPath) : (isBuiltinOverride ? { frontmatter: {}, body: '' } : null);
+  const mdData = mdExists ? parseMdFile(mdPath) : (isBuiltinOverride ? { frontmatter: {}, body: '' } : null);
   let mdModified = false;
   let jsonModified = false;
   const creatingNewMd = isBuiltinOverride;
@@ -249,43 +223,41 @@ function updateAgent(name, updates, workingDir) {
       jsonModified = true;
     } else if (inMd || creatingNewMd) {
       if (mdData) { mdData.frontmatter[field] = value; mdModified = true; }
+    } else if ((mdExists || creatingNewMd) && mdData) {
+      mdData.frontmatter[field] = value;
+      mdModified = true;
     } else {
-      if ((mdExists || creatingNewMd) && mdData) {
-        mdData.frontmatter[field] = value;
-        mdModified = true;
-      } else {
-        if (!jsonConfig.agent) jsonConfig.agent = {};
-        if (!jsonConfig.agent[name]) jsonConfig.agent[name] = {};
-        jsonConfig.agent[name][field] = value;
-        jsonModified = true;
-      }
+      if (!jsonConfig.agent) jsonConfig.agent = {};
+      if (!jsonConfig.agent[name]) jsonConfig.agent[name] = {};
+      jsonConfig.agent[name][field] = value;
+      jsonModified = true;
     }
   }
 
   if (mdModified && mdData) {
-    writeMdFile(targetPath, mdData.frontmatter, mdData.body);
+    await writeMdFileAsync(targetPath, mdData.frontmatter, mdData.body);
   }
   if (jsonModified) {
-    writeConfig(jsonConfig, jsonTarget.path);
+    await writeConfigAsync(jsonConfig, jsonTarget.path);
   }
 }
 
-function deleteAgent(name, workingDir) {
+async function deleteAgent(name, workingDir) {
   ensureDirs();
   let deleted = false;
 
   if (workingDir) {
     const projectPath = getProjectAgentPath(workingDir, name);
-    if (fs.existsSync(projectPath)) { fs.unlinkSync(projectPath); deleted = true; }
+    if (fs.existsSync(projectPath)) { await fs.promises.unlink(projectPath); deleted = true; }
   }
   const userPath = getUserAgentPath(name);
-  if (fs.existsSync(userPath)) { fs.unlinkSync(userPath); deleted = true; }
+  if (fs.existsSync(userPath)) { await fs.promises.unlink(userPath); deleted = true; }
 
   const layers = readConfigLayers(workingDir);
   const jsonSource = getJsonEntrySource(layers, name);
   if (jsonSource.exists && jsonSource.config && jsonSource.path) {
     if (jsonSource.config.agent) delete jsonSource.config.agent[name];
-    writeConfig(jsonSource.config, jsonSource.path);
+    await writeConfigAsync(jsonSource.config, jsonSource.path);
     deleted = true;
   }
 
@@ -293,27 +265,29 @@ function deleteAgent(name, workingDir) {
     const jsonTarget = getJsonWriteTarget(layers);
     if (!jsonTarget.config.agent) jsonTarget.config.agent = {};
     jsonTarget.config.agent[name] = { disable: true };
-    writeConfig(jsonTarget.config, jsonTarget.path);
+    await writeConfigAsync(jsonTarget.config, jsonTarget.path);
   }
 }
 
-function fireRestartOpenCode() {
+async function restartOpenCodeAndWait(reason) {
   const { currentWorkingDir } = getState();
-  restartOpenCode(currentWorkingDir).catch(err => {
-    console.error('[agents] Failed to restart OpenCode:', err.message);
-  });
+  console.log(`[agents] Restarting OpenCode after ${reason}...`);
+  try {
+    await restartOpenCode(currentWorkingDir);
+    console.log(`[agents] OpenCode ready after ${reason}`);
+  } catch (error) {
+    console.error(`[agents] OpenCode restart failed after ${reason}:`, error.message);
+    throw error;
+  }
 }
 
 function resolveDirectory(req) {
   const dir = req.query.directory || req.headers['x-opencode-directory'];
   if (dir) return dir;
-  const { currentWorkingDir } = getState();
-  return currentWorkingDir;
+  return getState().currentWorkingDir;
 }
 
 export default function registerAgentRoutes(app) {
-  const jsonBody = express.json();
-
   app.get('/api/config/agents/:name', (req, res) => {
     try {
       const agentName = req.params.name;
@@ -331,40 +305,35 @@ export default function registerAgentRoutes(app) {
     try {
       const agentName = req.params.name;
       const workingDir = resolveDirectory(req);
-      const configInfo = getAgentConfig(agentName, workingDir);
-      res.json(configInfo);
+      res.json(getAgentConfig(agentName, workingDir));
     } catch (error) {
       console.error('[agents] GET config failed:', error);
       res.status(500).json({ error: 'Failed to get agent configuration' });
     }
   });
 
-  app.post('/api/config/agents/:name', jsonBody, async (req, res) => {
+  app.post('/api/config/agents/:name', express.json(), async (req, res) => {
     try {
       const agentName = req.params.name;
       const { scope, ...config } = req.body;
       const workingDir = resolveDirectory(req);
-
-      createAgent(agentName, config, workingDir, scope);
-      fireRestartOpenCode();
-
-      res.json({ success: true, requiresReload: true, message: `Agent ${agentName} created successfully.` });
+      await createAgent(agentName, config, workingDir, scope);
+      await restartOpenCodeAndWait('agent creation');
+      res.json({ success: true, requiresReload: true, message: `Agent ${agentName} created.` });
     } catch (error) {
       console.error('[agents] Create failed:', error);
       res.status(500).json({ error: error.message || 'Failed to create agent' });
     }
   });
 
-  app.patch('/api/config/agents/:name', jsonBody, async (req, res) => {
+  app.patch('/api/config/agents/:name', express.json(), async (req, res) => {
     try {
       const agentName = req.params.name;
       const updates = req.body;
       const workingDir = resolveDirectory(req);
-
-      updateAgent(agentName, updates, workingDir);
-      fireRestartOpenCode();
-
-      res.json({ success: true, requiresReload: true, message: `Agent ${agentName} updated successfully.` });
+      await updateAgent(agentName, updates, workingDir);
+      await restartOpenCodeAndWait('agent update');
+      res.json({ success: true, requiresReload: true, message: `Agent ${agentName} updated.` });
     } catch (error) {
       console.error('[agents] Update failed:', error);
       res.status(500).json({ error: error.message || 'Failed to update agent' });
@@ -375,11 +344,9 @@ export default function registerAgentRoutes(app) {
     try {
       const agentName = req.params.name;
       const workingDir = resolveDirectory(req);
-
-      deleteAgent(agentName, workingDir);
-      fireRestartOpenCode();
-
-      res.json({ success: true, requiresReload: true, message: `Agent ${agentName} deleted successfully.` });
+      await deleteAgent(agentName, workingDir);
+      await restartOpenCodeAndWait('agent deletion');
+      res.json({ success: true, requiresReload: true, message: `Agent ${agentName} deleted.` });
     } catch (error) {
       console.error('[agents] Delete failed:', error);
       res.status(500).json({ error: error.message || 'Failed to delete agent' });
